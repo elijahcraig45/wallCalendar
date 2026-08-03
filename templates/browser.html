@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block topbar %}
+<h1>Browser</h1>
+{% endblock %}
+
+{% block content %}
+<div id="browser-view">
+  <form id="browser-form">
+    <input id="browser-url" type="text" placeholder="https://example.com/recipe" inputmode="url">
+    <button type="submit">Go</button>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.getElementById("browser-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    let url = document.getElementById("browser-url").value.trim();
+    if (!/^https?:\/\//i.test(url)) {
+      url = "https://" + url;
+    }
+    window.location.href = url;
+  });
+</script>
+{% endblock %}

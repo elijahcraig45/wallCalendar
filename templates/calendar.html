@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block topbar %}
+<button id="prev-month" class="nav-arrow" aria-label="Previous month">&#8249;</button>
+<h1 id="month-label"></h1>
+<button id="next-month" class="nav-arrow" aria-label="Next month">&#8250;</button>
+{% endblock %}
+
+{% block content %}
+<div id="calendar-view" data-year="{{ year }}" data-month="{{ month }}">
+  <div id="weekday-row">
+    <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span>
+    <span>Thu</span><span>Fri</span><span>Sat</span>
+  </div>
+  <div id="month-grid"></div>
+</div>
+
+<div id="day-overlay" class="hidden">
+  <div id="day-overlay-panel">
+    <button id="day-overlay-close" aria-label="Close">&times;</button>
+    <h2 id="day-overlay-date"></h2>
+    <ul id="day-overlay-events"></ul>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/calendar.js"></script>
+{% endblock %}
