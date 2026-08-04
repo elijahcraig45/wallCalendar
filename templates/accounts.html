@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block topbar %}
+<h1>Accounts</h1>
+{% endblock %}
+
+{% block content %}
+<div id="accounts-view">
+  <ul id="account-list" class="row-list"></ul>
+  <a href="/auth/google/start" class="full-width-button" id="add-account-button">+ Add Google Account</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/accounts.js"></script>
+{% endblock %}

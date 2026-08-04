@@ -1,29 +1,146 @@
 {% extends "base.html" %}
 
 {% block topbar %}
-<button id="prev-month" class="nav-arrow" aria-label="Previous month">&#8249;</button>
-<h1 id="month-label"></h1>
-<button id="next-month" class="nav-arrow" aria-label="Next month">&#8250;</button>
+<div class="month-nav">
+  <button id="prev-month" class="nav-arrow" aria-label="Previous month">&#8249;</button>
+  <h1 id="month-label"></h1>
+  <button id="next-month" class="nav-arrow" aria-label="Next month">&#8250;</button>
+</div>
+<div class="topbar-actions">
+  <button id="refresh-toggle" aria-label="Refresh">
+    <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L14 11h7V4l-3.35 2.35z"/></svg>
+  </button>
+  <button id="manage-calendars-toggle" aria-label="Manage calendars">
+    <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"/></svg>
+    <span id="manage-calendars-badge" class="badge-dot hidden"></span>
+  </button>
+  <button id="add-event-toggle" aria-label="Add event">
+    <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+  </button>
+</div>
 {% endblock %}
 
 {% block content %}
 <div id="calendar-view" data-year="{{ year }}" data-month="{{ month }}">
+  <div id="view-switcher" role="tablist">
+    <button class="view-tab" data-view="month" aria-selected="true">Month</button>
+    <button class="view-tab" data-view="week" aria-selected="false">Week</button>
+    <button class="view-tab" data-view="agenda" aria-selected="false">Agenda</button>
+  </div>
   <div id="weekday-row">
     <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span>
     <span>Thu</span><span>Fri</span><span>Sat</span>
   </div>
-  <div id="month-grid"></div>
+  <div id="month-grid" class="calendar-pane calendar-pane--grid"></div>
+  <ul id="week-view" class="calendar-pane row-list hidden"></ul>
+  <ul id="agenda-view" class="calendar-pane row-list hidden"></ul>
 </div>
 
-<div id="day-overlay" class="hidden">
-  <div id="day-overlay-panel">
+<div id="day-overlay" class="modal-overlay hidden">
+  <div id="day-overlay-panel" class="modal-panel">
     <button id="day-overlay-close" aria-label="Close">&times;</button>
     <h2 id="day-overlay-date"></h2>
     <ul id="day-overlay-events"></ul>
   </div>
 </div>
+
+<div id="calendars-overlay" class="sheet-overlay hidden">
+  <div id="calendars-panel" class="sheet-panel">
+    <div class="sheet-header">
+      <h2>Manage Calendars</h2>
+      <button id="calendars-close" class="sheet-close" aria-label="Close">&times;</button>
+    </div>
+    <ul id="calendars-list" class="row-list sheet-body"></ul>
+  </div>
+</div>
+
+<div id="add-event-overlay" class="sheet-overlay hidden">
+  <div id="add-event-panel" class="sheet-panel sheet-panel--tall">
+    <div class="sheet-header">
+      <h2 id="add-event-heading">Add Event</h2>
+      <button id="add-event-close" class="sheet-close" aria-label="Close">&times;</button>
+    </div>
+    <form id="add-event-form" class="sheet-body form-body">
+      <div class="field">
+        <label for="add-event-title">Title</label>
+        <input id="add-event-title" class="text-input" type="text" required>
+      </div>
+
+      <div class="field">
+        <label for="add-event-calendar">Calendar</label>
+        <select id="add-event-calendar" class="select" required></select>
+      </div>
+
+      <div class="checkbox-row">
+        <input id="add-event-all-day" type="checkbox">
+        <label for="add-event-all-day">All day</label>
+      </div>
+
+      <div class="field-row" id="add-event-datetime-fields">
+        <div class="field">
+          <label for="add-event-start">Starts</label>
+          <input id="add-event-start" class="text-input" type="datetime-local">
+        </div>
+        <div class="field">
+          <label for="add-event-end">Ends</label>
+          <input id="add-event-end" class="text-input" type="datetime-local">
+        </div>
+      </div>
+
+      <div class="field-row hidden" id="add-event-date-fields">
+        <div class="field">
+          <label for="add-event-start-date">Starts</label>
+          <input id="add-event-start-date" class="text-input" type="date">
+        </div>
+        <div class="field">
+          <label for="add-event-end-date">Ends</label>
+          <input id="add-event-end-date" class="text-input" type="date">
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="add-event-location">Location</label>
+        <input id="add-event-location" class="text-input" type="text">
+      </div>
+
+      <div class="field">
+        <label for="add-event-description">Description</label>
+        <textarea id="add-event-description" class="text-input"></textarea>
+      </div>
+
+      <div class="field" id="add-event-recurrence-field">
+        <label for="add-event-recurrence">Repeats</label>
+        <select id="add-event-recurrence" class="select">
+          <option value="none">Does not repeat</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+          <option value="yearly">Yearly</option>
+        </select>
+      </div>
+
+      <p class="field-hint hidden" id="add-event-recurrence-note">
+        This is part of a repeating event — its recurrence can't be changed here.
+      </p>
+
+      <div class="field hidden" id="add-event-until-field">
+        <label for="add-event-until">Until</label>
+        <input id="add-event-until" class="text-input" type="date">
+      </div>
+
+      <div class="field">
+        <label for="add-event-guests">Guests</label>
+        <input id="add-event-guests" class="text-input" type="text" placeholder="comma-separated emails">
+      </div>
+
+      <button type="submit" id="add-event-submit" class="full-width-button">Create Event</button>
+      <button type="button" id="add-event-delete" class="full-width-button danger hidden">Delete Event</button>
+    </form>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
+<script src="/static/panel.js"></script>
 <script src="/static/calendar.js"></script>
 {% endblock %}

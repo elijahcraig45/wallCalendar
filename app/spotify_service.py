@@ -45,6 +45,8 @@ def now_playing() -> dict | None:
 
     item = playback["item"]
     images = item.get("album", {}).get("images", [])
+    device = playback.get("device") or {}
+    context = playback.get("context") or {}
     return {
         "is_playing": playback.get("is_playing", False),
         "track": item.get("name"),
@@ -53,7 +55,66 @@ def now_playing() -> dict | None:
         "progress_ms": playback.get("progress_ms"),
         "duration_ms": item.get("duration_ms"),
         "shuffle_state": playback.get("shuffle_state", False),
+        "repeat_state": playback.get("repeat_state", "off"),
+        "volume_percent": device.get("volume_percent"),
+        "supports_volume": device.get("supports_volume", True),
+        "context_uri": context.get("uri"),
     }
+
+
+def seek(position_ms: int) -> None:
+    _client().seek_track(position_ms)
+
+
+def set_volume(volume_percent: int) -> None:
+    _client().volume(volume_percent)
+
+
+def set_repeat(state: str) -> None:  # "off" | "context" | "track"
+    _client().repeat(state)
+
+
+def queue(limit: int = 20) -> dict:
+    data = _client().queue()
+    current = _track_summary(data["currently_playing"]) if data.get("currently_playing") else None
+    upcoming = [_track_summary(t) for t in data.get("queue", [])[:limit]]
+    return {"current": current, "upcoming": upcoming}
+
+
+def liked_songs(limit: int = 100, offset: int = 0) -> list[dict]:
+    # me/tracks caps at 50/page and nests under items[].track like
+    # recently_played - paginate with plain spotipy calls, no deprecation
+    # issue here unlike playlist_tracks.
+    tracks, page_offset = [], offset
+    while len(tracks) < limit:
+        page = _client().current_user_saved_tracks(limit=min(50, limit - len(tracks)), offset=page_offset)
+        items = page["items"]
+        if not items:
+            break
+        tracks.extend(_track_summary(i["track"]) for i in items)
+        page_offset += len(items)
+    return tracks[:limit]
+
+
+def album_tracks(album_id: str, limit: int = 50) -> list[dict]:
+    # /albums/{id}/tracks returns simplified track objects (no "album" key,
+    # so _track_summary's image lookup yields None) - the client backfills
+    # each row's image with the overlay's own header art instead. If this
+    # ever 403s the way the deprecated playlist /tracks path did, the fix is
+    # the same raw-requests-with-bearer-token pattern PLAYLIST_ITEMS_URL
+    # already uses, hitting https://api.spotify.com/v1/albums/{id}/tracks.
+    results = _client().album_tracks(album_id, limit=min(limit, 50))
+    tracks = [_track_summary(t) for t in results["items"]]
+    while results.get("next") and len(tracks) < limit:
+        results = _client().next(results)
+        tracks.extend(_track_summary(t) for t in results["items"])
+    return tracks[:limit]
+
+
+def play_uris(uris: list[str], offset_uri: str | None = None) -> None:
+    # Backs Liked Songs, which has no context_uri to hang play_context off
+    # of. Spotify caps uris at 100 - pairs with liked_songs(limit=100).
+    _client().start_playback(uris=uris, offset={"uri": offset_uri} if offset_uri else None)
 
 
 def play() -> None:

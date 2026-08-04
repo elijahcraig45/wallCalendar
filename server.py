@@ -1,11 +1,17 @@
 import datetime as dt
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, session
+from google.auth.exceptions import GoogleAuthError
+from googleapiclient.errors import HttpError
 from spotipy.exceptions import SpotifyException
 
-from app import calendar_service, spotify_service
+from app import calendar_service, preferences, spotify_service
+from app.auth import google_auth
+from app.auth.errors import classify
+from app.config import FLASK_SECRET_KEY
 
 app = Flask(__name__)
+app.secret_key = FLASK_SECRET_KEY
 
 
 @app.errorhandler(SpotifyException)
@@ -14,6 +20,21 @@ def handle_spotify_exception(e):
     if e.http_status == 404 and "NO_ACTIVE_DEVICE" in (e.reason or ""):
         message = "No active Spotify device - open the device picker and pick one."
     return jsonify({"error": message}), e.http_status or 500
+
+
+@app.errorhandler(HttpError)
+def handle_google_http_error(e):
+    return jsonify({"error": e.reason or str(e)}), e.status_code or 500
+
+
+@app.errorhandler(GoogleAuthError)
+def handle_google_auth_error(e):
+    # Covers create/update/delete-event's unguarded get_credentials() call -
+    # unlike the isolated kiosk-grid fetch path, a single user-initiated
+    # action failing loudly here is correct, not something to swallow.
+    err = classify("", e)
+    status = 401 if err.kind == "needs_reauth" else 502
+    return jsonify({"error": err.message}), status
 
 
 @app.route("/")
@@ -25,6 +46,187 @@ def index():
 @app.route("/api/calendar/<int:year>/<int:month>")
 def api_calendar(year, month):
     return jsonify(calendar_service.get_month_grid(year, month))
+
+
+@app.route("/api/calendar/week/<int:year>/<int:month>/<int:day>")
+def api_calendar_week(year, month, day):
+    return jsonify(calendar_service.get_week_grid(year, month, day))
+
+
+@app.route("/api/calendar/agenda")
+def api_calendar_agenda():
+    from_str = request.args.get("from")
+    from_date = dt.date.fromisoformat(from_str) if from_str else dt.date.today()
+    num_days = int(request.args.get("days", 30))
+    return jsonify(calendar_service.get_agenda(from_date, num_days))
+
+
+@app.route("/api/calendar/refresh", methods=["POST"])
+def api_calendar_refresh():
+    # Bypasses the 5-minute cache TTL for a manual pull of latest events -
+    # e.g. a change made directly in Google Calendar on someone's phone
+    # wouldn't otherwise show up here until the cache naturally expired.
+    calendar_service.invalidate_cache()
+    return jsonify({"ok": True})
+
+
+@app.route("/auth/google/start")
+def google_auth_start():
+    auth_url, state = google_auth.build_auth_url()
+    session["google_oauth_state"] = state
+    reauth_email = request.args.get("reauth")
+    if reauth_email:
+        session["google_reauth_email"] = reauth_email
+    else:
+        session.pop("google_reauth_email", None)
+    return redirect(auth_url)
+
+
+@app.route("/auth/google/callback")
+def google_auth_callback():
+    # Popped at the very top, before any early-return branch, so it can
+    # never leak into a later unrelated sign-in (e.g. abandoning a
+    # "Reconnect" attempt for one account, then adding a different one).
+    expected_reauth = session.pop("google_reauth_email", None)
+
+    if request.args.get("error"):
+        return redirect(f"/accounts?error={request.args['error']}")
+
+    expected_state = session.pop("google_oauth_state", None)
+    if not expected_state or request.args.get("state") != expected_state:
+        return redirect("/accounts?error=state_mismatch")
+
+    try:
+        email = google_auth.finish_auth(request.url, expected_state)
+    except Exception:
+        return redirect("/accounts?error=auth_failed")
+
+    calendar_service.invalidate_cache()
+    if expected_reauth and expected_reauth != email:
+        return redirect(f"/accounts?signed_in={email}&mismatch={expected_reauth}")
+    return redirect(f"/accounts?signed_in={email}")
+
+
+@app.route("/accounts")
+def accounts_page():
+    return render_template("accounts.html")
+
+
+@app.route("/api/calendar/accounts")
+def api_calendar_accounts():
+    labels = preferences.load_labels()
+    return jsonify(
+        [
+            {"email": email, "label": labels.get(email, email)}
+            for email in google_auth.signed_in_accounts()
+        ]
+    )
+
+
+@app.route("/api/calendar/accounts/health")
+def api_calendar_accounts_health():
+    return jsonify(calendar_service.check_accounts_health())
+
+
+@app.route("/api/calendar/accounts/<email>/label", methods=["POST"])
+def api_calendar_account_label(email):
+    preferences.set_account_label(email, request.json["label"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/calendar/accounts/<email>/remove", methods=["POST"])
+def api_calendar_account_remove(email):
+    google_auth.remove_account(email)
+    calendar_service.invalidate_cache()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/calendar/calendars")
+def api_calendar_calendars():
+    writable_only = request.args.get("writable_only") == "true"
+    prefs = preferences.load_prefs()
+    calendars, errors = calendar_service.list_all_calendars(writable_only=writable_only)
+    return jsonify(
+        {
+            "calendars": calendars,
+            "excluded_calendar_ids": prefs.get("excluded_calendar_ids", []),
+            "errors": errors,
+        }
+    )
+
+
+@app.route("/api/calendar/calendars/visibility", methods=["POST"])
+def api_calendar_calendars_visibility():
+    data = request.json
+    preferences.set_calendar_excluded(data["calendar_id"], data["excluded"])
+    calendar_service.invalidate_cache()
+    return jsonify({"ok": True})
+
+
+@app.route("/api/calendar/events", methods=["POST"])
+def api_calendar_create_event():
+    data = request.json
+    result = calendar_service.create_event(
+        account=data["account"],
+        calendar_id=data["calendar_id"],
+        time_zone=data["time_zone"],
+        title=data["title"],
+        location=data.get("location") or None,
+        description=data.get("description") or None,
+        all_day=data["all_day"],
+        start=data["start"],
+        end=data["end"],
+        recurrence_freq=data.get("recurrence_freq", "none"),
+        recurrence_until=data.get("recurrence_until") or None,
+        guests=data.get("guests", []),
+    )
+    return jsonify({"ok": True, "event_id": result["id"]})
+
+
+@app.route("/api/calendar/event")
+def api_calendar_get_event():
+    # Query params, not path segments - real calendar ids commonly contain
+    # "#" (e.g. en.usa#holiday@group.v.calendar.google.com), which breaks
+    # URL path parsing.
+    result = calendar_service.get_event(
+        account=request.args["account"],
+        calendar_id=request.args["calendar_id"],
+        event_id=request.args["event_id"],
+    )
+    return jsonify(result)
+
+
+@app.route("/api/calendar/events/update", methods=["POST"])
+def api_calendar_update_event():
+    data = request.json
+    result = calendar_service.update_event(
+        account=data["account"],
+        calendar_id=data["calendar_id"],
+        event_id=data["event_id"],
+        time_zone=data["time_zone"],
+        title=data["title"],
+        location=data.get("location") or None,
+        description=data.get("description") or None,
+        all_day=data["all_day"],
+        start=data["start"],
+        end=data["end"],
+        recurrence_freq=data.get("recurrence_freq", "none"),
+        recurrence_until=data.get("recurrence_until") or None,
+        guests=data.get("guests", []),
+    )
+    return jsonify({"ok": True, "event_id": result["id"]})
+
+
+@app.route("/api/calendar/events/delete", methods=["POST"])
+def api_calendar_delete_event():
+    data = request.json
+    calendar_service.delete_event(
+        account=data["account"],
+        calendar_id=data["calendar_id"],
+        event_id=data["event_id"],
+        notify_guests=data.get("notify_guests", False),
+    )
+    return jsonify({"ok": True})
 
 
 @app.route("/spotify")
@@ -108,6 +310,46 @@ def api_spotify_play_context_at():
 @app.route("/api/spotify/shuffle", methods=["POST"])
 def api_spotify_shuffle():
     spotify_service.set_shuffle(request.json["state"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/spotify/seek", methods=["POST"])
+def api_spotify_seek():
+    spotify_service.seek(request.json["position_ms"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/spotify/volume", methods=["POST"])
+def api_spotify_volume():
+    spotify_service.set_volume(request.json["volume_percent"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/spotify/repeat", methods=["POST"])
+def api_spotify_repeat():
+    spotify_service.set_repeat(request.json["state"])
+    return jsonify({"ok": True})
+
+
+@app.route("/api/spotify/queue")
+def api_spotify_queue():
+    return jsonify(spotify_service.queue())
+
+
+@app.route("/api/spotify/liked-songs")
+def api_spotify_liked_songs():
+    return jsonify(spotify_service.liked_songs())
+
+
+@app.route("/api/spotify/album/<album_id>/tracks")
+def api_spotify_album_tracks(album_id):
+    return jsonify(spotify_service.album_tracks(album_id))
+
+
+@app.route("/api/spotify/play-uris", methods=["POST"])
+def api_spotify_play_uris():
+    data = request.json
+    spotify_service.play_uris(data["uris"], data.get("offset_uri"))
     return jsonify({"ok": True})
 
 

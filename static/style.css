@@ -98,6 +98,37 @@ html, body {
   align-items: center;
 }
 
+.month-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+#refresh-toggle,
+#manage-calendars-toggle,
+#add-event-toggle {
+  position: relative;
+  background: none;
+  border: none;
+  color: var(--text);
+  min-width: 44px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.badge-dot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ea4335;
+}
+
 #nav-backdrop {
   position: fixed;
   inset: 0;
@@ -164,6 +195,63 @@ html, body {
   min-height: 0;
 }
 
+#view-switcher {
+  flex: 0 0 auto;
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+
+.view-tab {
+  flex: 1;
+  min-height: 44px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+}
+
+.view-tab[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.week-day-row,
+.agenda-day-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.week-day-label,
+.agenda-day-header {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.week-day-label.today,
+.agenda-day-header.today {
+  color: var(--accent);
+}
+
+.week-day-events,
+.agenda-day-events {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.week-day-empty {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
 #weekday-row {
   flex: 0 0 var(--weekday-row-height);
   display: grid;
@@ -174,9 +262,25 @@ html, body {
   align-items: center;
 }
 
-#month-grid {
+/* #weekday-row is only shown for month view. Its own `display: grid` is
+   ID-scoped (like #day-overlay used to be), so hiding it via the plain
+   .hidden class needs this same-ID override - a class alone can't beat it
+   regardless of source order. */
+#weekday-row.hidden {
+  display: none;
+}
+
+/* Shared by #month-grid/#week-view/#agenda-view so switching views never
+   needs an ID-scoped `display` rule - an ID would beat the .hidden class
+   toggle regardless of source order (the exact bug already hit once with
+   #day-overlay, since fixed by keying visibility off classes instead). */
+.calendar-pane {
   flex: 1;
   min-height: 0;
+  overflow-y: auto;
+}
+
+.calendar-pane--grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   grid-template-rows: repeat(6, 1fr);
@@ -228,29 +332,9 @@ html, body {
   margin-top: 2px;
 }
 
-#day-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* an ID selector always beats a plain class one, so hiding this needs its
-   own ID-scoped rule - .hidden alone can't override #day-overlay's display */
-#day-overlay.hidden {
-  display: none;
-}
-
 #day-overlay-panel {
-  background: var(--surface);
-  border-radius: 12px;
   padding: 20px;
   width: 85%;
-  max-height: 70vh;
-  overflow-y: auto;
-  position: relative;
 }
 
 #day-overlay-close {
@@ -310,6 +394,17 @@ html, body {
   height: 10px;
   border-radius: 50%;
   flex: 0 0 auto;
+}
+
+.add-event-row {
+  color: var(--accent);
+  text-align: center;
+  justify-content: center;
+  border-left: none;
+  background: none;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
 }
 
 /* ---------- spotify home ---------- */
@@ -594,17 +689,29 @@ html, body {
   z-index: 0;
 }
 
-#nowplaying-collapse {
+#nowplaying-header {
   position: relative;
   z-index: 1;
-  display: block;
-  margin: 8px auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 0;
+}
+
+#nowplaying-collapse,
+#queue-toggle {
   background: none;
   border: none;
   color: var(--text);
-  font-size: 1.4rem;
   min-width: 44px;
   min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#nowplaying-collapse {
+  font-size: 1.4rem;
 }
 
 #spotify-main {
@@ -628,29 +735,6 @@ html, body {
 
 #track-title { margin: 0 0 6px; font-size: 1.4rem; }
 #track-artist { margin: 0 0 20px; color: var(--text-dim); font-weight: normal; font-size: 1.1rem; }
-
-#device-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  z-index: 1100;
-}
-
-#device-overlay.hidden { display: none; }
-
-#device-panel {
-  background: var(--surface);
-  border-radius: 12px 12px 0 0;
-  width: 100%;
-  max-width: 420px;
-  max-height: 60vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
 
 #device-panel-header {
   display: flex;
@@ -709,7 +793,12 @@ html, body {
 #progress-container {
   width: 100%;
   max-width: 320px;
-  margin-bottom: 36px;
+  margin-bottom: 20px;
+  /* The visible bar stays 4px tall, but the tappable/seekable region needs
+     to clear the 44px touch-target minimum - padding extends the hit area
+     without changing what's painted. */
+  padding: 16px 0;
+  touch-action: none;
 }
 
 #progress-bar {
@@ -771,8 +860,7 @@ html, body {
   height: 30px;
 }
 
-.transport-btn-small,
-.transport-btn-small-spacer {
+.transport-btn-small {
   width: 36px;
   height: 36px;
 }
@@ -787,31 +875,53 @@ html, body {
   background: rgba(29, 185, 84, 0.15);
 }
 
-.hidden { display: none; }
+#volume-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 320px;
+  margin-top: 24px;
+  color: var(--text-dim);
+}
+
+#volume-row.hidden { display: none; }
+
+#volume-slider {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+#volume-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--spotify-green);
+  border: none;
+}
+
+#volume-slider::-moz-range-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--spotify-green);
+  border: none;
+}
 
 /* ---------- playlist detail ---------- */
 
-#playlist-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  z-index: 1100;
-}
-
-#playlist-overlay.hidden { display: none; }
-
-#playlist-panel {
-  background: var(--surface);
-  border-radius: 12px 12px 0 0;
-  width: 100%;
-  max-width: 420px;
+/* playlist/artist/queue panels want more height than the .sheet-panel
+   default (60vh) for their longer track/album lists */
+#playlist-panel,
+#artist-panel,
+#queue-panel {
   max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
 }
 
 #playlist-panel-header {
@@ -901,29 +1011,6 @@ html, body {
 }
 
 /* ---------- artist detail ---------- */
-
-#artist-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  z-index: 1100;
-}
-
-#artist-overlay.hidden { display: none; }
-
-#artist-panel {
-  background: var(--surface);
-  border-radius: 12px 12px 0 0;
-  width: 100%;
-  max-width: 420px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
 
 #artist-panel-header {
   display: flex;
@@ -1021,3 +1108,283 @@ html, body {
   color: #fff;
   font-size: 1rem;
 }
+
+/* ---------- shared modal / bottom-sheet + form-field classes ----------
+   Used by the account/calendar-visibility/add-event UI (and the retrofitted
+   day-overlay). Keying visibility off these classes rather than an element's
+   own ID sidesteps the specificity issue an ID-scoped display rule would
+   otherwise need (an ID always beats a plain class). Spotify's three
+   existing overlays (#device-*/#playlist-*/#artist-*) are left as their own
+   bespoke ID-scoped rules above - working code, no benefit to retrofitting. */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.modal-overlay.hidden { display: none; }
+
+.modal-panel {
+  background: var(--surface);
+  border-radius: 12px;
+  max-height: 70vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 1100;
+}
+
+.sheet-overlay.hidden { display: none; }
+
+.sheet-panel {
+  background: var(--surface);
+  border-radius: 12px 12px 0 0;
+  width: 100%;
+  max-width: 420px;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sheet-panel--tall { max-height: 85vh; max-width: 560px; }
+
+.field-row {
+  flex-wrap: wrap;
+}
+
+.sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.sheet-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.sheet-close {
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.6rem;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.sheet-body {
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.sheet-body.form-body {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.row-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  min-height: 44px;
+}
+
+.row-list .account-group-header {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-weight: 600;
+  min-height: auto;
+  padding: 12px 16px 4px;
+  border-bottom: none;
+}
+
+.row-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.row-title .row-subtext {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.row-list button {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  font-size: 0.85rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+.field-row {
+  display: flex;
+  gap: 10px;
+}
+
+.field-row .field { flex: 1; }
+
+.text-input,
+.select,
+textarea.text-input {
+  min-height: 44px;
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+textarea.text-input {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.checkbox-row input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+}
+
+.field-hint {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin: -6px 0 0;
+}
+
+.full-width-button.danger {
+  background: #ea4335;
+  margin-top: 8px;
+}
+
+.full-width-button.danger[data-armed="true"] {
+  background: #b31412;
+}
+
+.event-card--editable {
+  cursor: pointer;
+}
+
+/* ---------- accounts page ---------- */
+
+#accounts-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 16px;
+  gap: 16px;
+}
+
+#account-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.health-badge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-top: 4px;
+  align-self: flex-start;
+}
+
+.health-badge--needs_reauth {
+  background: rgba(234, 67, 53, 0.18);
+  color: #ff8a80;
+}
+
+.health-badge--unknown {
+  background: rgba(251, 188, 5, 0.18);
+  color: #ffd479;
+}
+
+.health-badge--transient {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-dim);
+}
+
+.reconnect-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 18px;
+  border: 1px solid var(--accent);
+  background: none;
+  color: var(--accent);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.full-width-button {
+  display: block;
+  min-height: 44px;
+  width: 100%;
+  border-radius: 6px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 1rem;
+  text-align: center;
+  text-decoration: none;
+  line-height: 44px;
+}
+
+/* Must stay the last rule in the file: with equal specificity, the later
+   rule wins cascade ties, and several classes above (.field-row, .field,
+   .sheet-panel, etc.) also set `display`. Keeping .hidden last guarantees
+   it always wins regardless of what else is combined with it. */
+.hidden { display: none; }

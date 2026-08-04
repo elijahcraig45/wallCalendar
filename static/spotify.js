@@ -4,11 +4,18 @@ const trackTitle = document.getElementById("track-title");
 const trackArtist = document.getElementById("track-artist");
 const playPauseBtn = document.getElementById("btn-play-pause");
 const shuffleBtn = document.getElementById("btn-shuffle");
+const repeatBtn = document.getElementById("btn-repeat");
 const iconPlay = document.getElementById("icon-play");
 const iconPause = document.getElementById("icon-pause");
+const iconRepeatAll = document.getElementById("icon-repeat-all");
+const iconRepeatOne = document.getElementById("icon-repeat-one");
+const progressContainer = document.getElementById("progress-container");
+const progressBar = document.getElementById("progress-bar");
 const progressFill = document.getElementById("progress-fill");
 const timeElapsed = document.getElementById("time-elapsed");
 const timeDuration = document.getElementById("time-duration");
+const volumeRow = document.getElementById("volume-row");
+const volumeSlider = document.getElementById("volume-slider");
 
 const miniPlayer = document.getElementById("mini-player");
 const miniArt = document.getElementById("mini-art");
@@ -21,6 +28,13 @@ const miniIconPause = document.getElementById("mini-icon-pause");
 const nowPlayingOverlay = document.getElementById("nowplaying-overlay");
 
 let state = { progressMs: 0, durationMs: 0, isPlaying: false, lastUpdate: Date.now() };
+
+// While actively dragging the seek bar or volume slider, an in-flight poll
+// or the SDK's player_state_changed push shouldn't yank the control back to
+// the pre-drag server value - both suppress overwriting their piece of
+// `state`/the slider until this timestamp passes.
+let suppressProgressUntil = 0;
+let suppressVolumeUntil = 0;
 
 function formatTime(ms) {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
@@ -41,6 +55,12 @@ function renderProgress() {
   timeDuration.textContent = formatTime(state.durationMs);
 }
 
+function updateRepeatButton(repeatState) {
+  repeatBtn.classList.toggle("active", repeatState !== "off");
+  iconRepeatOne.classList.toggle("hidden", repeatState !== "track");
+  iconRepeatAll.classList.toggle("hidden", repeatState === "track");
+}
+
 async function refreshNowPlaying() {
   const resp = await fetch("/api/spotify/now-playing");
   const data = await resp.json();
@@ -54,6 +74,8 @@ async function refreshNowPlaying() {
     iconPlay.classList.remove("hidden");
     iconPause.classList.add("hidden");
     shuffleBtn.classList.remove("active");
+    updateRepeatButton("off");
+    volumeRow.classList.add("hidden");
     renderProgress();
     miniPlayer.classList.add("hidden");
     return;
@@ -61,16 +83,33 @@ async function refreshNowPlaying() {
 
   trackTitle.textContent = data.track;
   trackArtist.textContent = data.artist;
-  state = {
-    progressMs: data.progress_ms || 0,
-    durationMs: data.duration_ms || 0,
-    isPlaying: data.is_playing,
-    lastUpdate: Date.now(),
-  };
+
+  // A local seek drag/tap already set state.progressMs/lastUpdate optimistically -
+  // don't let a poll that lands within the suppression window stomp on it.
+  if (Date.now() >= suppressProgressUntil) {
+    state = {
+      progressMs: data.progress_ms || 0,
+      durationMs: data.duration_ms || 0,
+      isPlaying: data.is_playing,
+      lastUpdate: Date.now(),
+    };
+  } else {
+    state.isPlaying = data.is_playing;
+  }
 
   iconPlay.classList.toggle("hidden", state.isPlaying);
   iconPause.classList.toggle("hidden", !state.isPlaying);
   shuffleBtn.classList.toggle("active", !!data.shuffle_state);
+  updateRepeatButton(data.repeat_state || "off");
+
+  if (data.supports_volume === false) {
+    volumeRow.classList.add("hidden");
+  } else {
+    volumeRow.classList.remove("hidden");
+    if (Date.now() >= suppressVolumeUntil && data.volume_percent != null) {
+      volumeSlider.value = data.volume_percent;
+    }
+  }
 
   if (data.album_art) {
     albumArt.src = data.album_art;
@@ -121,6 +160,100 @@ document.getElementById("btn-previous").addEventListener("click", () => post("/a
 shuffleBtn.addEventListener("click", () =>
   post("/api/spotify/shuffle", { state: !shuffleBtn.classList.contains("active") })
 );
+
+const NEXT_REPEAT_STATE = { off: "context", context: "track", track: "off" };
+repeatBtn.addEventListener("click", () => {
+  const current = repeatBtn.classList.contains("active")
+    ? (iconRepeatOne.classList.contains("hidden") ? "context" : "track")
+    : "off";
+  const next = NEXT_REPEAT_STATE[current];
+  updateRepeatButton(next); // optimistic - no drift risk like progress/volume
+  post("/api/spotify/repeat", { state: next });
+});
+
+// ---------- seek/scrub ----------
+
+let isScrubbing = false;
+
+function seekFractionFromEvent(e) {
+  const rect = progressBar.getBoundingClientRect();
+  const frac = (e.clientX - rect.left) / rect.width;
+  return Math.min(1, Math.max(0, frac));
+}
+
+progressContainer.addEventListener("pointerdown", (e) => {
+  isScrubbing = true;
+  const positionMs = seekFractionFromEvent(e) * state.durationMs;
+  state.progressMs = positionMs;
+  state.lastUpdate = Date.now();
+  renderProgress();
+});
+
+progressContainer.addEventListener("pointermove", (e) => {
+  if (!isScrubbing) return;
+  const positionMs = seekFractionFromEvent(e) * state.durationMs;
+  state.progressMs = positionMs;
+  state.lastUpdate = Date.now();
+  renderProgress();
+});
+
+progressContainer.addEventListener("pointerup", (e) => {
+  if (!isScrubbing) return;
+  isScrubbing = false;
+  const positionMs = seekFractionFromEvent(e) * state.durationMs;
+  state.progressMs = positionMs;
+  state.lastUpdate = Date.now();
+  renderProgress();
+  suppressProgressUntil = Date.now() + 1500;
+  post("/api/spotify/seek", { position_ms: Math.round(positionMs) });
+});
+
+// ---------- volume ----------
+
+let volumeDebounce = null;
+
+volumeSlider.addEventListener("input", () => {
+  suppressVolumeUntil = Date.now() + 1500;
+  clearTimeout(volumeDebounce);
+  volumeDebounce = setTimeout(() => {
+    post("/api/spotify/volume", { volume_percent: parseInt(volumeSlider.value, 10) });
+  }, 200);
+});
+
+volumeSlider.addEventListener("change", () => {
+  clearTimeout(volumeDebounce);
+  post("/api/spotify/volume", { volume_percent: parseInt(volumeSlider.value, 10) });
+});
+
+// ---------- queue ----------
+
+const queuePanel = initPanel("queue-overlay", "queue-close");
+const queueTracksEl = document.getElementById("queue-tracks");
+
+document.getElementById("queue-toggle").addEventListener("click", async () => {
+  queueTracksEl.innerHTML = '<li class="playlist-loading">Loading...</li>';
+  queuePanel.open();
+
+  const resp = await fetch("/api/spotify/queue");
+  const data = await resp.json();
+
+  queueTracksEl.innerHTML = "";
+  if (data.current) {
+    const li = document.createElement("li");
+    li.className = "playlist-loading";
+    li.textContent = `Now playing: ${data.current.name}`;
+    queueTracksEl.appendChild(li);
+  }
+  if (data.upcoming.length === 0) {
+    const li = document.createElement("li");
+    li.textContent = "Nothing queued";
+    queueTracksEl.appendChild(li);
+  } else {
+    data.upcoming.forEach((t) => {
+      queueTracksEl.appendChild(renderTrackRow(t, () => {}));
+    });
+  }
+});
 
 refreshNowPlaying();
 setInterval(refreshNowPlaying, 5000);
@@ -195,13 +328,50 @@ async function loadQuickAccess() {
   );
 }
 
+const LIKED_SONGS_ICON =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' fill='%231c1f26'/%3E%3Cpath fill='%231DB954' d='M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z'/%3E%3C/svg%3E";
+
+function shuffleArray(items) {
+  const result = items.slice();
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [result[i], result[j]] = [result[j], result[i]];
+  }
+  return result;
+}
+
+function openLikedSongsDetail() {
+  // Liked Songs has no context_uri the way playlists/albums do, so playback
+  // goes through play-uris with the fetched track list directly - and
+  // set_shuffle has no effect on uris-based playback, so "Shuffle" here is
+  // a real client-side reorder of that list, not a server-side flag.
+  let cachedTracks = [];
+  openTrackListOverlay({
+    title: "Liked Songs",
+    image: LIKED_SONGS_ICON,
+    fetchTracks: async () => {
+      cachedTracks = await fetch("/api/spotify/liked-songs").then((r) => r.json());
+      return cachedTracks;
+    },
+    onPlayAll: () => post("/api/spotify/play-uris", { uris: cachedTracks.map((t) => t.uri) }),
+    onShuffle: () =>
+      post("/api/spotify/play-uris", { uris: shuffleArray(cachedTracks).map((t) => t.uri) }),
+    onTrackTap: (t) =>
+      post("/api/spotify/play-uris", {
+        uris: cachedTracks.map((tr) => tr.uri),
+        offset_uri: t.uri,
+      }),
+  });
+}
+
 async function loadPlaylists() {
   const resp = await fetch("/api/spotify/playlists");
   const lists = await resp.json();
+  const withLiked = [{ name: "Liked Songs", image: LIKED_SONGS_ICON, __liked: true }, ...lists];
   renderTiles(
     document.getElementById("playlists-strip"),
-    lists,
-    (item) => openPlaylistDetail(item)
+    withLiked,
+    (item) => (item.__liked ? openLikedSongsDetail() : openPlaylistDetail(item))
   );
 }
 
@@ -241,7 +411,7 @@ searchInput.addEventListener("input", () => {
 
     if (data.albums.length > 0) {
       const strip = addSearchGroup("Albums", "tile-strip");
-      renderTiles(strip, data.albums, (item) => post("/api/spotify/play-context", { uri: item.uri }));
+      renderTiles(strip, data.albums, (item) => openAlbumDetail(item));
     }
 
     if (data.tracks.length > 0) {
@@ -331,7 +501,7 @@ window.onSpotifyWebPlaybackSDKReady = () => {
 // ---------- device picker ----------
 
 const deviceToggle = document.getElementById("device-toggle");
-const deviceOverlay = document.getElementById("device-overlay");
+const devicePanel = initPanel("device-overlay", "device-close");
 const deviceList = document.getElementById("device-list");
 
 const SPEAKER_ICON =
@@ -365,7 +535,7 @@ async function loadDevices() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ device_id: d.id, play: true }),
       });
-      deviceOverlay.classList.add("hidden");
+      devicePanel.close();
       setTimeout(refreshNowPlaying, 300);
     });
 
@@ -374,92 +544,118 @@ async function loadDevices() {
 }
 
 deviceToggle.addEventListener("click", () => {
-  deviceOverlay.classList.remove("hidden");
+  devicePanel.open();
   loadDevices();
 });
 
-document.getElementById("device-close").addEventListener("click", () => {
-  deviceOverlay.classList.add("hidden");
-});
+// ---------- track list overlay (playlists, albums, Liked Songs) ----------
+// One reusable panel driven by closures, rather than a hand-copied overlay
+// per source - the mechanics differ (context-based play for playlists/
+// albums, uris-based play for Liked Songs, which has no context_uri) but
+// the markup/lifecycle is identical.
 
-deviceOverlay.addEventListener("click", (e) => {
-  if (e.target === deviceOverlay) deviceOverlay.classList.add("hidden");
-});
-
-// ---------- playlist detail ----------
-
-const playlistOverlay = document.getElementById("playlist-overlay");
+const trackListPanel = initPanel("playlist-overlay", "playlist-close");
 const playlistImage = document.getElementById("playlist-image");
 const playlistName = document.getElementById("playlist-name");
 const playlistTracksEl = document.getElementById("playlist-tracks");
-let currentPlaylistUri = null;
+const playlistPlayBtn = document.getElementById("playlist-play-btn");
+const playlistShuffleBtn = document.getElementById("playlist-shuffle-btn");
 
-async function openPlaylistDetail(item) {
-  currentPlaylistUri = item.uri;
-  playlistImage.src = item.image || "";
-  playlistName.textContent = item.name;
+let currentTrackListActions = null;
+
+function renderTrackRow(t, onTap) {
+  const li = document.createElement("li");
+
+  const img = document.createElement("img");
+  img.src = t.image || "";
+  img.alt = "";
+  li.appendChild(img);
+
+  const text = document.createElement("div");
+  text.className = "result-text";
+  const title = document.createElement("span");
+  title.className = "result-title";
+  title.textContent = t.name;
+  const artist = document.createElement("span");
+  artist.className = "result-artist";
+  artist.textContent = t.artist;
+  text.appendChild(title);
+  text.appendChild(artist);
+  li.appendChild(text);
+
+  li.addEventListener("click", () => onTap(t));
+  return li;
+}
+
+async function openTrackListOverlay({ title, image, fetchTracks, onPlayAll, onShuffle, onTrackTap }) {
+  playlistImage.src = image || "";
+  playlistName.textContent = title;
   playlistTracksEl.innerHTML = '<li class="playlist-loading">Loading...</li>';
-  playlistOverlay.classList.remove("hidden");
+  currentTrackListActions = { onPlayAll, onShuffle };
+  trackListPanel.open();
 
-  const playlistId = item.uri.split(":").pop();
-  const resp = await fetch(`/api/spotify/playlist/${playlistId}/tracks`);
-  const tracks = await resp.json();
+  const tracks = await fetchTracks();
 
   playlistTracksEl.innerHTML = "";
   tracks.forEach((t) => {
-    const li = document.createElement("li");
-
-    const img = document.createElement("img");
-    img.src = t.image || "";
-    img.alt = "";
-    li.appendChild(img);
-
-    const text = document.createElement("div");
-    text.className = "result-text";
-    const title = document.createElement("span");
-    title.className = "result-title";
-    title.textContent = t.name;
-    const artist = document.createElement("span");
-    artist.className = "result-artist";
-    artist.textContent = t.artist;
-    text.appendChild(title);
-    text.appendChild(artist);
-    li.appendChild(text);
-
-    li.addEventListener("click", () => {
-      post("/api/spotify/play-context-at", { context_uri: currentPlaylistUri, track_uri: t.uri });
-      playlistOverlay.classList.add("hidden");
-    });
-
-    playlistTracksEl.appendChild(li);
+    // Album tracks have no per-track image - every track on an album shares
+    // the same cover art, so fall back to the overlay's own header image.
+    const rowData = t.image ? t : { ...t, image };
+    playlistTracksEl.appendChild(
+      renderTrackRow(rowData, (track) => {
+        onTrackTap(track);
+        trackListPanel.close();
+      })
+    );
   });
 }
 
-document.getElementById("playlist-play-btn").addEventListener("click", () => {
-  post("/api/spotify/play-context", { uri: currentPlaylistUri });
-  playlistOverlay.classList.add("hidden");
+function openPlaylistDetail(item) {
+  const playlistId = item.uri.split(":").pop();
+  openTrackListOverlay({
+    title: item.name,
+    image: item.image,
+    fetchTracks: () => fetch(`/api/spotify/playlist/${playlistId}/tracks`).then((r) => r.json()),
+    onPlayAll: () => post("/api/spotify/play-context", { uri: item.uri }),
+    onShuffle: async () => {
+      await post("/api/spotify/shuffle", { state: true });
+      post("/api/spotify/play-context", { uri: item.uri });
+    },
+    onTrackTap: (t) => post("/api/spotify/play-context-at", { context_uri: item.uri, track_uri: t.uri }),
+  });
+}
+
+function openAlbumDetail(item) {
+  const albumId = item.uri.split(":").pop();
+  openTrackListOverlay({
+    title: item.name,
+    image: item.image,
+    fetchTracks: () => fetch(`/api/spotify/album/${albumId}/tracks`).then((r) => r.json()),
+    onPlayAll: () => post("/api/spotify/play-context", { uri: item.uri }),
+    onShuffle: async () => {
+      await post("/api/spotify/shuffle", { state: true });
+      post("/api/spotify/play-context", { uri: item.uri });
+    },
+    onTrackTap: (t) => post("/api/spotify/play-context-at", { context_uri: item.uri, track_uri: t.uri }),
+  });
+}
+
+playlistPlayBtn.addEventListener("click", () => {
+  currentTrackListActions?.onPlayAll();
+  trackListPanel.close();
 });
 
-document.getElementById("playlist-shuffle-btn").addEventListener("click", async () => {
-  await post("/api/spotify/shuffle", { state: true });
-  post("/api/spotify/play-context", { uri: currentPlaylistUri });
-  playlistOverlay.classList.add("hidden");
-});
-
-document.getElementById("playlist-close").addEventListener("click", () => {
-  playlistOverlay.classList.add("hidden");
-});
-
-playlistOverlay.addEventListener("click", (e) => {
-  if (e.target === playlistOverlay) playlistOverlay.classList.add("hidden");
+playlistShuffleBtn.addEventListener("click", () => {
+  currentTrackListActions?.onShuffle();
+  trackListPanel.close();
 });
 
 // ---------- artist detail ----------
 // No radio/recommendations here - Spotify permanently killed that endpoint
 // for apps without extended quota access. This shows the artist's actual
-// discography instead; tap an album to play it.
+// discography instead; tap an album to open its track list.
 
-const artistOverlay = document.getElementById("artist-overlay");
+const artistPanel = initPanel("artist-overlay", "artist-close");
 const artistImage = document.getElementById("artist-image");
 const artistName = document.getElementById("artist-name");
 const artistAlbumsEl = document.getElementById("artist-albums");
@@ -468,7 +664,7 @@ async function openArtistDetail(item) {
   artistImage.src = item.image || "";
   artistName.textContent = item.name;
   artistAlbumsEl.innerHTML = '<li class="playlist-loading">Loading...</li>';
-  artistOverlay.classList.remove("hidden");
+  artistPanel.open();
 
   const resp = await fetch(`/api/spotify/artist/${item.id}/albums`);
   const albums = await resp.json();
@@ -491,18 +687,10 @@ async function openArtistDetail(item) {
     li.appendChild(text);
 
     li.addEventListener("click", () => {
-      post("/api/spotify/play-context", { uri: a.uri });
-      artistOverlay.classList.add("hidden");
+      artistPanel.close();
+      openAlbumDetail(a);
     });
 
     artistAlbumsEl.appendChild(li);
   });
 }
-
-document.getElementById("artist-close").addEventListener("click", () => {
-  artistOverlay.classList.add("hidden");
-});
-
-artistOverlay.addEventListener("click", (e) => {
-  if (e.target === artistOverlay) artistOverlay.classList.add("hidden");
-});

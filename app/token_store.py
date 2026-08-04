@@ -26,3 +26,7 @@ def list_accounts(provider: str) -> list[str]:
         p.stem[len(prefix):]
         for p in TOKENS_DIR.glob(f"{prefix}*.json")
     ]
+
+
+def delete_token(provider: str, email: str) -> None:
+    _path(provider, email).unlink(missing_ok=True)
