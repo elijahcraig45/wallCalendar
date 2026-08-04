@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=UxPlay
+Comment=AirPlay mirroring receiver
+Exec=__INSTALL_DIR__/deploy/uxplay-launch.sh
+X-GNOME-Autostart-enabled=true
+NoDisplay=false

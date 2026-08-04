@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Wall Calendar Kiosk
+Comment=Full-screen kiosk browser showing the wall calendar
+Exec=__INSTALL_DIR__/deploy/kiosk-launch.sh
+X-GNOME-Autostart-enabled=true
+NoDisplay=false

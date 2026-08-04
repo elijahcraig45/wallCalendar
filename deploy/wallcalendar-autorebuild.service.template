@@ -1,0 +1,10 @@
+[Unit]
+Description=Pull latest wallCalendar code and restart the service if it changed
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__INSTALL_DIR__/deploy/git-autorebuild.sh

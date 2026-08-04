@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodically check wallCalendar's git repo for updates
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=10min
+Unit=wallcalendar-autorebuild.service
+
+[Install]
+WantedBy=timers.target
