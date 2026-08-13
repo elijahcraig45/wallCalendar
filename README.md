@@ -70,16 +70,58 @@ The screen dims after dark and any touch wakes it for a few minutes. The schedul
 follows real sunset/sunrise from the weather rather than a fixed hour, falling back
 to 22:00–06:00 when weather is unavailable.
 
-### Monthly themes
+### Event colours come from Google
 
-The month's colour runs through the chrome: the header bar, the Sun–Sat strip,
-today's cell, the rail's active item and the time grid's today column. Text colour,
-contrast, type and event colours never move — events carry their owner's colour, not
-the theme's. Turn it off with `localStorage.calendar_themes = "off"`.
+An event takes its own `colorId` if it has one, otherwise its **calendar's** colour
+— so "Family" is the same orange on the wall as on a phone. Measured against the
+real account: 0 of 156 events set an explicit colorId, so in practice the calendar
+colour is what shows. Google's palette is light chips with dark text, and the
+foreground it supplies is carried through — white on `#fbd75b` would be unreadable.
 
-The first attempt changed only the accent and a 6%-alpha wash, which measured out at
-900 of 1,906,560 pixels — 0.05% of the screen — and was invisible from a chair. If
-you tighten this again, check it on the wall, not in a browser a foot from your face.
+Events are the one thing a theme never recolours, for exactly this reason.
+
+### Multi-day events span their days
+
+All-day events render as **bars spanning the days they cover**, packed into lanes,
+not as a chip repeated in every cell — a four-day trip previously looked like four
+unrelated one-day events. A bar clipped by the week edge is squared off on that side
+and prefixed with `‹` when it continues from the previous week.
+
+Month cells render every timed event and are then **trimmed to fit by measurement**
+(`trimCellsToFit`), replacing what doesn't fit with "+N more". An earlier version
+computed a capacity up front and kept getting it wrong — it has to account for the
+day number, that week's span lanes, cell padding, grid gaps and the font's real line
+height, and any miss shows up as silently clipped events.
+
+### Themes — `static/themes.js`
+
+That file is the whole theming system and is written to be edited. A theme is a
+palette:
+
+```js
+{ name: "August — heat", accent: "#e0873c", secondary: "#8c4a2f",
+  base: "#15100c", surface: "#241a13", lines: "#4a3527", strength: 1.0 }
+```
+
+Only `accent` is required; everything else is derived from it, so
+`{ accent: "#8a6fd4" }` is a valid theme. `strength` scales every translucent tint
+at once (0 = off, 1 = default, 1.6 = bold). Text colour, contrast and type never
+change at any strength — this is read from across a room.
+
+Try one live without deploying, from devtools on the wall:
+
+```js
+localStorage.wallcal_theme = JSON.stringify({ name: "test", accent: "#8a6fd4", strength: 1.4 });
+location.reload();
+```
+
+`wallcal_themes` (an array of twelve) overrides the whole year;
+`calendar_themes = "off"` returns to flat dark mode. Full instructions, and notes on
+which colours actually work over a dark ground, are in the header of `themes.js`.
+
+The first attempt at theming changed only the accent and a 6%-alpha wash — measured
+at 900 of 1,906,560 pixels, 0.05% of the screen, and invisible from a chair. If you
+tighten it again, check it on the wall, not in a browser a foot from your face.
 
 ## Views
 

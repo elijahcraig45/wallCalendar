@@ -120,7 +120,7 @@ def check_no_global_script_collisions():
     import re
 
     static = pathlib.Path(__file__).resolve().parent.parent / "static"
-    shell = ["panel.js", "weather.js", "nav.js", "timers.js"]
+    shell = ["panel.js", "themes.js", "weather.js", "nav.js", "timers.js"]
     pages = ["calendar.js", "spotify.js", "recipes.js", "today.js",
              "browser.js", "accounts.js"]
     patterns = (

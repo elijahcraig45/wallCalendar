@@ -27,6 +27,14 @@
      derive a translucent tint of the current month's colour. Defaults to the
      Google blue in case a page renders before the script runs. */
   --accent-rgb: 66 133 244;
+  /* Multiplies every themed alpha, so one number in themes.js dials the whole
+     theme up or down. 0 means no theme at all. */
+  --theme-strength: 1;
+  /* The rest of the palette themes.js sets. Defaults here keep the page sane if a
+     script fails to load. */
+  --accent2: #4285F4;
+  --accent2-rgb: 66 133 244;
+  --grid-line: #2c303a;
 }
 
 /* 1024x600 (official Pi 7" DSI) - the tightest target. */
@@ -508,18 +516,39 @@ html {
   overflow-y: auto;
 }
 
+/* The month grid is a column of week rows rather than one flat 7xN grid, because
+   each week needs its own span layer laid over its own cells. Rows are equal
+   height; the data decides how many there are (5 or 6). */
 .calendar-pane--grid {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  /* grid-template-rows is set by calendar.js from the actual number of weeks -
-     hardcoding 6 left a permanently empty row on months that fit in 5. */
-  gap: 1px;
-  background: var(--border);
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
+  gap: 1px;
+  background: var(--grid-line);
 }
 
+.week-row {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  --lanes: 0;
+}
+
+.week-cells {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 1px;
+  height: 100%;
+  background: var(--grid-line);
+}
+
+/* The calendar surface carries the month's colour too, not just the chrome around
+   it. Previously the grid stayed flat near-black while the header was seasonal,
+   which read as "dark mode with a coloured hat" rather than as a theme. */
 .day-cell {
-  background: var(--surface);
+  background:
+    linear-gradient(rgb(var(--accent-rgb) / calc(0.055 * var(--theme-strength))), rgb(var(--accent-rgb) / calc(0.055 * var(--theme-strength)))),
+    var(--surface);
   padding: 3px 4px;
   overflow: hidden;
   display: flex;
@@ -527,11 +556,25 @@ html {
   min-height: 0;
 }
 
-.day-cell.outside-month { opacity: 0.3; }
-.day-cell.today { background: var(--surface-hi); }
+.day-cell.outside-month {
+  background:
+    linear-gradient(rgb(var(--accent-rgb) / calc(0.02 * var(--theme-strength))), rgb(var(--accent-rgb) / calc(0.02 * var(--theme-strength)))),
+    var(--bg);
+}
+.day-cell.outside-month .day-number,
+.day-cell.outside-month .event-pill { opacity: 0.45; }
+
+.day-cell.today {
+  background:
+    linear-gradient(rgb(var(--accent-rgb) / calc(0.16 * var(--theme-strength))), rgb(var(--accent-rgb) / calc(0.16 * var(--theme-strength)))),
+    var(--surface-hi);
+  box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / calc(0.55 * var(--theme-strength)));
+}
+
 .day-cell.today .day-number {
   background: var(--accent);
-  color: #fff;
+  color: #10131a;
+  font-weight: 700;
   border-radius: 999px;
 }
 
@@ -545,6 +588,70 @@ html {
   justify-content: center;
   align-self: flex-start;
   flex: 0 0 auto;
+}
+
+/* Holds open exactly the height this week's span lanes occupy, so a week with no
+   all-day events gives the space back to its timed events. */
+.day-span-space {
+  flex: 0 0 auto;
+  height: calc(var(--lanes) * (var(--pill-height) + 2px));
+}
+
+/* ---------- multi-day span bars ---------- */
+
+.week-spans {
+  position: absolute;
+  top: var(--day-number-height);
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-auto-rows: var(--pill-height);
+  gap: 2px;
+  padding: 0 3px;
+  /* The layer itself must not eat taps meant for the day cell underneath; the
+     bars re-enable them for themselves. */
+  pointer-events: none;
+}
+
+.span-bar {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  height: var(--pill-height);
+  padding: 0 7px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.span-bar-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A bar clipped by the week edge is squared off on that side, so it reads as
+   continuing rather than as starting or ending there. */
+.span-bar--open-left {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -3px;
+}
+
+.span-bar--open-right {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  margin-right: -3px;
+}
+
+.span-bar--more {
+  background: rgb(var(--accent-rgb) / calc(0.22 * var(--theme-strength)));
+  color: var(--text);
+  font-size: 0.68rem;
+  justify-content: center;
 }
 
 .event-pill {
@@ -2036,32 +2143,42 @@ textarea.text-input {
    cell and a perceptible wash. Text colour, contrast and event colours are still
    untouched, which was the right instinct - just applied to almost nothing. */
 
+/* Two hues, not one: a single-colour wash over a dark ground is nearly
+   indistinguishable from a flat surface, which is how the first attempt at this
+   ended up invisible. accent2 defaults to a darker accent, so a one-colour theme
+   still works. */
 #stage {
   background-image: linear-gradient(
     160deg,
-    rgb(var(--accent-rgb) / 0.13) 0%,
-    rgb(var(--accent-rgb) / 0.04) 55%,
-    rgb(var(--accent-rgb) / 0.09) 100%
+    rgb(var(--accent-rgb) / calc(0.14 * var(--theme-strength))) 0%,
+    rgb(var(--accent2-rgb) / calc(0.10 * var(--theme-strength))) 55%,
+    rgb(var(--accent-rgb) / calc(0.07 * var(--theme-strength))) 100%
   );
 }
 
 /* The largest single themed surface, and the one at eye level. */
 #top-bar {
   background-image: linear-gradient(
-    90deg,
-    rgb(var(--accent-rgb) / 0.20) 0%,
-    rgb(var(--accent-rgb) / 0.06) 60%,
-    rgb(var(--accent-rgb) / 0.12) 100%
+    100deg,
+    rgb(var(--accent-rgb) / calc(0.26 * var(--theme-strength))) 0%,
+    rgb(var(--accent2-rgb) / calc(0.20 * var(--theme-strength))) 55%,
+    rgb(var(--accent-rgb) / calc(0.10 * var(--theme-strength))) 100%
   );
-  border-bottom-color: rgb(var(--accent-rgb) / 0.45);
+  border-bottom-color: rgb(var(--accent-rgb) / calc(0.5 * var(--theme-strength)));
 }
 
 /* Sun..Sat reads as a label row, so tinting it costs no legibility and gives the
    month an unmistakable colour across the full width. */
 #weekday-row {
-  color: rgb(var(--accent-rgb) / 0.92);
-  background: rgb(var(--accent-rgb) / 0.10);
-  border-bottom: 2px solid rgb(var(--accent-rgb) / 0.5);
+  /* Not alpha-scaled: at strength 0 this must fall back to a readable grey rather
+     than to fully transparent text. */
+  color: var(--accent);
+  background-image: linear-gradient(
+    100deg,
+    rgb(var(--accent-rgb) / calc(0.16 * var(--theme-strength))) 0%,
+    rgb(var(--accent2-rgb) / calc(0.12 * var(--theme-strength))) 100%
+  );
+  border-bottom: 2px solid rgb(var(--accent-rgb) / calc(0.5 * var(--theme-strength)));
   font-weight: 600;
 }
 
@@ -2069,15 +2186,15 @@ textarea.text-input {
    is what makes "where is today" answerable from across the room. */
 .day-cell.today {
   background:
-    linear-gradient(rgb(var(--accent-rgb) / 0.16), rgb(var(--accent-rgb) / 0.16)),
+    linear-gradient(rgb(var(--accent-rgb) / calc(0.16 * var(--theme-strength))), rgb(var(--accent-rgb) / calc(0.16 * var(--theme-strength)))),
     var(--surface-hi);
-  box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / 0.55);
+  box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / calc(0.55 * var(--theme-strength)));
 }
 
 /* The rail's active item and the time grid's today column, for the same reason. */
-.rail-item.active { background: rgb(var(--accent-rgb) / 0.18); }
-.timegrid-col.today { background: rgb(var(--accent-rgb) / 0.10); }
-.timegrid-day-head.today { background: rgb(var(--accent-rgb) / 0.14); }
+.rail-item.active { background: rgb(var(--accent-rgb) / calc(0.18 * var(--theme-strength))); }
+.timegrid-col.today { background: rgb(var(--accent-rgb) / calc(0.10 * var(--theme-strength))); }
+.timegrid-day-head.today { background: rgb(var(--accent-rgb) / calc(0.14 * var(--theme-strength))); }
 
 /* ---------- night dimming ---------- */
 

@@ -16,9 +16,32 @@ class DemoModeError(RuntimeError):
     """Raised instead of faking a successful write while in demo mode - a demo
     run must never look like it saved something that went nowhere."""
 
-# Assigned by person (account), not by Google's per-calendar colorId - two
-# accounts means two colors, legible from across a room.
+# Fallback only. Real colours come from Google now: an event's own colorId if it
+# sets one, otherwise the colour of the calendar it lives on - which is what the
+# household already sees in Google Calendar, so the wall matches rather than
+# inventing its own scheme. Measured against a real account: 0 of 156 events set
+# an explicit colorId, so in practice the calendar colour is what shows.
 PERSON_COLORS = ["#4285F4", "#EA4335", "#34A853", "#FBBC05", "#8E24AA", "#00ACC1"]
+
+# Google's palette is light pastels paired with a dark foreground (#1d1d1d) - it
+# is designed to be read as dark text on a coloured chip, which is also what
+# Google Calendar's own dark mode does. Carrying the foreground through is what
+# keeps a #fbd75b yellow event readable.
+DEFAULT_EVENT_TEXT = "#1d1d1d"
+
+_event_palette: dict | None = None
+
+
+def _fetch_event_palette(service) -> dict:
+    """Google's colorId -> {background, foreground} map. Effectively static, so it
+    is fetched once per process rather than per request."""
+    global _event_palette
+    if _event_palette is None:
+        try:
+            _event_palette = service.colors().get().execute().get("event", {})
+        except Exception:  # noqa: BLE001 - colours are cosmetic; never fail a fetch
+            _event_palette = {}
+    return _event_palette
 
 CACHE_TTL_SECONDS = 300
 ERROR_CACHE_TTL_SECONDS = 60
@@ -275,6 +298,7 @@ def _fetch_events_for_range(
             creds = google_auth.get_credentials(email)
             service = build("calendar", "v3", credentials=creds)
             calendars = service.calendarList().list().execute().get("items", [])
+            palette = _fetch_event_palette(service)
         except ACCOUNT_FETCH_ERRORS as exc:
             errors.append(classify(email, exc).to_dict())
             continue
@@ -284,6 +308,11 @@ def _fetch_events_for_range(
             if cal_id in excluded:
                 continue
             is_owner = cal.get("accessRole") == "owner"
+            # The calendar's own colour is what an event inherits unless it
+            # overrides it, and it's what the household already sees in Google
+            # Calendar - so "Family" is the same orange on the wall as on a phone.
+            cal_bg = cal.get("backgroundColor") or _person_color(email, accounts)
+            cal_fg = cal.get("foregroundColor") or DEFAULT_EVENT_TEXT
 
             try:
                 page_token = None
@@ -304,6 +333,10 @@ def _fetch_events_for_range(
                     for event in resp.get("items", []):
                         if "start" not in event or "end" not in event:
                             continue  # cancelled/malformed entries
+
+                        entry = palette.get(str(event.get("colorId") or ""), {})
+                        event_bg = entry.get("background") or cal_bg
+                        event_fg = entry.get("foreground") or cal_fg
 
                         uid = event.get("iCalUID", event["id"])
                         existing = events_by_uid.get(uid)
@@ -354,7 +387,9 @@ def _fetch_events_for_range(
                             "end_iso": end_iso,
                             "account": email,
                             "owner_label": _owner_label(email),
-                            "color": _person_color(email, accounts),
+                            "calendar_name": cal.get("summary"),
+                            "color": event_bg,
+                            "text_color": event_fg,
                             "sort_minutes": sort_minutes,
                             "_is_owner_copy": is_owner,
                         }

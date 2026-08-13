@@ -69,9 +69,9 @@ for (const vp of VIEWPORTS) {
       // used to leave a permanently empty band across the bottom.
       const cells = await page.locator("#month-grid .day-cell").count();
       expect(cells % 7).toBe(0);
-      const rows = await page.evaluate(() =>
-        getComputedStyle(document.getElementById("month-grid")).gridTemplateRows.split(" ").length
-      );
+      // One .week-row per week: each needs its own span-bar layer over its own
+      // cells, so this is a column of week grids rather than one flat 7xN grid.
+      const rows = await page.locator("#month-grid .week-row").count();
       expect(rows).toBe(cells / 7);
 
       // No cell may hide content it rendered - pills-per-cell is computed from
@@ -92,19 +92,23 @@ for (const vp of VIEWPORTS) {
       // somewhere rather than silently dropping events.
       await expect(page.locator(".event-overflow").first()).toBeVisible();
 
-      // Long titles must ellipsise inside the pill, not overflow it. A bare text
-      // node on .event-pill (a flex container) ignores text-overflow entirely,
-      // so every pill title lives in its own span.
-      const overflowingPills = await page.evaluate(() =>
-        [...document.querySelectorAll(".event-pill")]
-          .filter((p) => p.scrollWidth > p.clientWidth + 1)
-          .map((p) => p.textContent)
+      // Long titles must ellipsise inside their chip, not overflow it. A bare text
+      // node in a flex container ignores text-overflow entirely, so every title
+      // lives in its own span - .event-pill-title for timed events,
+      // .span-bar-label for the all-day bars.
+      const overflowing = await page.evaluate(() =>
+        [...document.querySelectorAll(".event-pill, .span-bar")]
+          .filter((el) => el.scrollWidth > el.clientWidth + 1)
+          .map((el) => el.textContent.trim())
       );
-      expect(overflowingPills, "pill text overflowing its pill").toEqual([]);
-      // ...and prove the check isn't vacuous: the fixtures include a title long
-      // enough that it must actually be ellipsised somewhere.
+      expect(overflowing, "chip text overflowing its chip").toEqual([]);
+
+      // ...and prove that check isn't vacuous. The long fixture title is an
+      // all-day event, so it renders as a span bar rather than a pill - which is
+      // exactly how this assertion silently stopped proving anything once
+      // multi-day events became bars.
       const ellipsised = await page.evaluate(() =>
-        [...document.querySelectorAll(".event-pill-title")]
+        [...document.querySelectorAll(".event-pill-title, .span-bar-label")]
           .filter((t) => t.scrollWidth > t.clientWidth + 1).length
       );
       expect(ellipsised, "nothing ellipsised - the overflow check proves nothing").toBeGreaterThan(0);
@@ -234,7 +238,9 @@ for (const vp of VIEWPORTS) {
 
     test("day overlay and event edit sheet fit on screen", async ({ page }) => {
       await page.goto("/");
-      await page.locator("#month-grid .day-cell.today").click();
+      // Aim at the day number: the centre of a cell is now covered by the span-bar
+      // layer, and a tap there is meant to open that event, not the day.
+      await page.locator("#month-grid .day-cell.today .day-number").click();
       await expect(page.locator("#day-overlay")).toBeVisible();
 
       const panelFits = await page.evaluate(() => {

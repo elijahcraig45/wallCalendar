@@ -18,11 +18,14 @@ import datetime as dt
 
 from app.config import DEMO_ACCOUNT_COUNT
 
-# (email, display label, calendar summary)
+# (email, display label, calendar summary, background, foreground)
+# Colours are taken from Google's real palette, because that's where live colours
+# come from now - an event inherits its calendar's colour unless it overrides it.
+# Light chip + dark text is Google's own scheme, not an invention here.
 _PEOPLE = [
-    ("henry.demo@example.com", "Henry", "Henry"),
-    ("avery.demo@example.com", "Avery", "Avery"),
-    ("robin.demo@example.com", "Robin", "Robin"),
+    ("henry.demo@example.com", "Henry", "Family", "#ffad46", "#000000"),
+    ("avery.demo@example.com", "Avery", "Avery", "#9fe1e7", "#000000"),
+    ("robin.demo@example.com", "Robin", "Robin", "#a47ae2", "#000000"),
 ]
 
 # Weekly rhythm, keyed by Python weekday (Mon=0 .. Sun=6). Each entry is
@@ -66,6 +69,9 @@ _ALL_DAY_ONE_OFFS = [
     (0, 0, 0, "Stay at Hilton Garden Inn Nashville Downtown — conference rate"),
     (0, 1, 1, "Mom's birthday"),
     (1, 2, 5, "Asheville trip"),
+    # Deliberately crosses a Saturday->Sunday boundary: a multi-day bar has to
+    # split across week rows and square off its cut ends.
+    (0, 4, 9, "Grandma visiting"),
     (0, 9, 9, "Registration deadline"),
 ]
 
@@ -87,7 +93,7 @@ def calendars(writable_only: bool = False) -> list[dict]:
             "access_role": "owner",
             "time_zone": "America/New_York",
         }
-        for email, _label, summary in _PEOPLE[:DEMO_ACCOUNT_COUNT]
+        for email, _label, summary, _bg, _fg in _PEOPLE[:DEMO_ACCOUNT_COUNT]
     ]
 
 
@@ -101,7 +107,7 @@ def _timed(
     location: str | None,
     color_for,
 ) -> dict:
-    email, label, summary = _PEOPLE[person_index]
+    email, label, summary, bg, fg = _PEOPLE[person_index]
     start = dt.datetime.combine(date, dt.time.fromisoformat(start_hhmm))
     end = dt.datetime.combine(date, dt.time.fromisoformat(end_hhmm))
     return {
@@ -121,7 +127,9 @@ def _timed(
         "end_iso": end.isoformat(),
         "account": email,
         "owner_label": label,
-        "color": color_for(email, accounts()),
+        "calendar_name": summary,
+        "color": bg,
+        "text_color": fg,
         "sort_minutes": start.hour * 60 + start.minute,
     }
 
@@ -134,7 +142,7 @@ def _all_day(
     title: str,
     color_for,
 ) -> dict:
-    email, label, summary = _PEOPLE[person_index]
+    email, label, summary, bg, fg = _PEOPLE[person_index]
     return {
         "uid": uid,
         "event_id": uid,
@@ -152,7 +160,9 @@ def _all_day(
         "end_iso": None,
         "account": email,
         "owner_label": label,
-        "color": color_for(email, accounts()),
+        "calendar_name": summary,
+        "color": bg,
+        "text_color": fg,
         "sort_minutes": -1,
     }
 

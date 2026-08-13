@@ -517,47 +517,125 @@ function updateAccountErrorBadge(errors) {
   }
 }
 
+/* ---------- month grid ----------
+
+   All-day events are drawn as bars that span the days they cover, not as a
+   separate chip repeated in every cell. A four-day trip used to look like four
+   unrelated one-day events, which is the single most misleading thing a month
+   view can do.
+
+   Structure per week: one 7-column grid of day cells (number + timed events),
+   with an absolutely-positioned 7-column grid of span bars laid over it, offset
+   below the day numbers. The cells reserve exactly as much vertical space as that
+   week needs for its lanes, so weeks with no all-day events give the room back to
+   timed events instead of leaving a permanent gap. */
+
+const MAX_SPAN_LANES = 3;
+
+/* Every all-day event touching this week, clipped to the week and annotated with
+   where it starts/ends and whether it runs off either edge. Single-day all-day
+   events are just spans of width one, which keeps one code path. */
+function collectSpans(week, daysByDate) {
+  const first = week[0];
+  const last = week[week.length - 1];
+  const seen = new Map();
+
+  week.forEach((date) => {
+    (daysByDate[date] || []).forEach((ev) => {
+      if (!ev.all_day || seen.has(ev.uid)) return;
+      const startIdx = week.indexOf(ev.start_date < first ? first : ev.start_date);
+      const endIdx = week.indexOf(ev.end_date > last ? last : ev.end_date);
+      if (startIdx === -1 || endIdx === -1) return;
+      seen.set(ev.uid, {
+        ev,
+        startIdx,
+        endIdx,
+        continuesLeft: ev.start_date < first,
+        continuesRight: ev.end_date > last,
+      });
+    });
+  });
+
+  // Longest-first within a start day keeps the big spans on the top lanes, which
+  // is both tidier and how every other calendar does it.
+  return [...seen.values()].sort(
+    (a, b) =>
+      a.startIdx - b.startIdx ||
+      b.endIdx - b.startIdx - (a.endIdx - a.startIdx) ||
+      a.ev.title.localeCompare(b.ev.title)
+  );
+}
+
+/* Greedy lane packing: each span takes the first lane with no overlap. Returns
+   how many lanes were needed. */
+function assignSpanLanes(spans) {
+  const laneEnds = [];
+  spans.forEach((span) => {
+    let lane = laneEnds.findIndex((end) => end < span.startIdx);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(span.endIdx);
+    } else {
+      laneEnds[lane] = span.endIdx;
+    }
+    span.lane = lane;
+  });
+  return laneEnds.length;
+}
+
 function renderGrid(grid) {
   monthGrid.innerHTML = "";
   const today = todayIso();
   const dates = Object.keys(grid.days).sort();
 
-  // Rows come from the data, not a fixed 6: a month that fits in 5 weeks would
-  // otherwise render a permanently empty sixth row.
-  const rows = Math.ceil(dates.length / 7);
-  monthGrid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
-  const capacity = cellCapacity(rows);
+  const weeks = [];
+  for (let i = 0; i < dates.length; i += 7) weeks.push(dates.slice(i, i + 7));
 
-  for (const dateStr of dates) {
-    const cell = document.createElement("div");
-    cell.className = "day-cell";
-    const dayNum = parseInt(dateStr.slice(8, 10), 10);
-    const cellMonth = parseInt(dateStr.slice(5, 7), 10);
+  weeks.forEach((week) => {
+    const weekEl = document.createElement("div");
+    weekEl.className = "week-row";
 
-    if (cellMonth !== grid.month) cell.classList.add("outside-month");
-    if (dateStr === today) cell.classList.add("today");
+    const spans = collectSpans(week, grid.days);
+    const lanesNeeded = assignSpanLanes(spans);
+    const laneCount = Math.min(MAX_SPAN_LANES, lanesNeeded);
+    const hidden = spans.filter((span) => span.lane >= laneCount);
+    // A capped week keeps one lane back for the "+N more" marker.
+    const visibleLanes = hidden.length > 0 ? Math.max(1, laneCount - 1) : laneCount;
+    const shown = spans.filter((span) => span.lane < visibleLanes);
+    const overflow = spans.filter((span) => span.lane >= visibleLanes);
+    const usedLanes = visibleLanes + (overflow.length ? 1 : 0);
+    weekEl.style.setProperty("--lanes", usedLanes);
 
-    const numEl = document.createElement("div");
-    numEl.className = "day-number";
-    numEl.textContent = dayNum;
-    cell.appendChild(numEl);
+    const cells = document.createElement("div");
+    cells.className = "week-cells";
 
-    const events = grid.days[dateStr];
-    // Only give up a row to the "+N more" line when something actually
-    // overflows - reserving it unconditionally meant a day with exactly as many
-    // events as would fit still hid one behind a "+1 more".
-    const maxShown = events.length <= capacity.full ? events.length : capacity.withOverflow;
+    week.forEach((dateStr) => {
+      const cell = document.createElement("div");
+      cell.className = "day-cell";
+      const dayNum = parseInt(dateStr.slice(8, 10), 10);
+      if (parseInt(dateStr.slice(5, 7), 10) !== grid.month) cell.classList.add("outside-month");
+      if (dateStr === today) cell.classList.add("today");
 
-    events.slice(0, maxShown).forEach((ev) => {
-      const pill = document.createElement("div");
-      pill.className = "event-pill";
-      if (ev.all_day) {
-        pill.style.background = ev.color;
-        pill.appendChild(pillTitle(ev.title));
-      } else {
-        // Timed events read as a dot + time + title rather than a solid bar,
-        // so a dense cell doesn't turn into a wall of color blocks.
-        pill.classList.add("event-pill--timed");
+      const numEl = document.createElement("div");
+      numEl.className = "day-number";
+      numEl.textContent = dayNum;
+      cell.appendChild(numEl);
+
+      // Holds open exactly the space the span layer occupies above the timed list.
+      const spacer = document.createElement("div");
+      spacer.className = "day-span-space";
+      cell.appendChild(spacer);
+
+      // Everything is rendered, then trimmed to fit by measurement in
+      // trimCellsToFit(). Computing a capacity up front kept getting the
+      // arithmetic wrong - it has to account for the day number, this week's span
+      // lanes, cell padding, grid gaps and the font's real line height, and a miss
+      // shows up as silently clipped events.
+      const timed = (grid.days[dateStr] || []).filter((ev) => !ev.all_day);
+
+      timed.forEach((ev) => {
+        const pill = document.createElement("div");
+        pill.className = "event-pill event-pill--timed";
         const dot = document.createElement("span");
         dot.className = "event-dot";
         dot.style.background = ev.color;
@@ -565,40 +643,83 @@ function renderGrid(grid) {
         when.className = "event-pill-time";
         when.textContent = ev.start_time;
         pill.append(dot, when, pillTitle(ev.title));
-      }
-      cell.appendChild(pill);
+        cell.appendChild(pill);
+      });
+
+      cell.addEventListener("click", () => openDayOverlay(dateStr, grid.days[dateStr] || []));
+      cells.appendChild(cell);
     });
 
-    if (events.length > maxShown) {
+    weekEl.appendChild(cells);
+
+    const spansEl = document.createElement("div");
+    spansEl.className = "week-spans";
+
+    shown.forEach((span) => {
+      const bar = document.createElement("div");
+      bar.className = "span-bar";
+      bar.style.gridColumn = `${span.startIdx + 1} / span ${span.endIdx - span.startIdx + 1}`;
+      bar.style.gridRow = String(span.lane + 1);
+      bar.style.background = span.ev.color;
+      // Google's palette is light chips with dark text; using the foreground it
+      // hands us is what keeps a yellow event readable.
+      bar.style.color = span.ev.text_color || "#1d1d1d";
+      // Square off the cut end so a bar that continues past the week edge reads as
+      // continuing rather than as ending there.
+      if (span.continuesLeft) bar.classList.add("span-bar--open-left");
+      if (span.continuesRight) bar.classList.add("span-bar--open-right");
+
+      const label = document.createElement("span");
+      label.className = "span-bar-label";
+      label.textContent = (span.continuesLeft ? "\u2039 " : "") + span.ev.title;
+      bar.appendChild(label);
+
+      attachEventOpen(bar, span.ev);
+      spansEl.appendChild(bar);
+    });
+
+    if (overflow.length > 0) {
+      const from = Math.min(...overflow.map((span) => span.startIdx));
+      const to = Math.max(...overflow.map((span) => span.endIdx));
       const more = document.createElement("div");
-      more.className = "event-overflow";
-      more.textContent = `+${events.length - maxShown} more`;
-      cell.appendChild(more);
+      more.className = "span-bar span-bar--more";
+      more.style.gridColumn = `${from + 1} / span ${to - from + 1}`;
+      more.style.gridRow = String(visibleLanes + 1);
+      more.textContent = `+${overflow.length} more`;
+      spansEl.appendChild(more);
     }
 
-    cell.addEventListener("click", () => openDayOverlay(dateStr, events));
-    monthGrid.appendChild(cell);
-  }
+    weekEl.appendChild(spansEl);
+    monthGrid.appendChild(weekEl);
+  });
+
+  trimCellsToFit();
 }
 
-/* How many pills a month cell can show, measured rather than assumed - a
-   1024x600 panel gives roughly half the cell height of a 1080p one, and a
-   fixed count would either overflow on the small screen or waste the big one.
-   Returns both capacities: `full` when every event fits, and `withOverflow`
-   when a "+N more" line has to be paid for out of the same space. */
-function cellCapacity(rows) {
-  const styles = getComputedStyle(document.documentElement);
-  const pillHeight = parseFloat(styles.getPropertyValue("--pill-height")) || 20;
-  const reserved = parseFloat(styles.getPropertyValue("--day-number-height")) || 26;
-  const overflowHeight = parseFloat(styles.getPropertyValue("--overflow-height")) || 16;
-  const cellHeight = monthGrid.clientHeight / rows;
-  if (!cellHeight) return { full: 3, withOverflow: 2 };
+/* Drops timed events from the bottom of any cell that can't fit them, replacing
+   them with a "+N more" line. Measured against what the browser actually laid
+   out, so it's right regardless of font metrics, padding, gaps, or how many span
+   lanes the week reserved above. */
+function trimCellsToFit() {
+  document.querySelectorAll("#month-grid .day-cell").forEach((cell) => {
+    const pills = [...cell.querySelectorAll(".event-pill--timed")];
+    if (pills.length === 0) return;
 
-  const usable = cellHeight - reserved;
-  return {
-    full: Math.max(1, Math.floor(usable / pillHeight)),
-    withOverflow: Math.max(1, Math.floor((usable - overflowHeight) / pillHeight)),
-  };
+    let more = null;
+    let hidden = 0;
+
+    while (cell.scrollHeight > cell.clientHeight + 1 && pills.length > 0) {
+      pills.pop().remove();
+      hidden += 1;
+      if (!more) {
+        // Added on first hide, so its own height is part of what gets measured.
+        more = document.createElement("div");
+        more.className = "event-overflow";
+        cell.appendChild(more);
+      }
+      more.textContent = `+${hidden} more`;
+    }
+  });
 }
 
 /* The title always goes in its own span, never as a bare text node on the pill:
