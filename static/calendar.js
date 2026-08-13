@@ -89,41 +89,6 @@ function loadCurrentView() {
    hit on a Pi over wifi, where a cache-miss month can take seconds. */
 let renderToken = 0;
 
-/* ---------- monthly themes ----------
-   The accent colour and a faint background wash shift with the month, so the wall
-   feels seasonal instead of identical all year. Deliberately limited to those two
-   things: text colour, contrast and type never move, because this is read from
-   across a room and legibility isn't up for negotiation. Set
-   localStorage.calendar_themes = "off" to switch it off. */
-const MONTH_THEMES = [
-  { accent: "#7aa2d6", wash: "rgba(122, 162, 214, 0.05)" }, // Jan - cold light
-  { accent: "#c98bb0", wash: "rgba(201, 139, 176, 0.05)" }, // Feb
-  { accent: "#6fae7c", wash: "rgba(111, 174, 124, 0.05)" }, // Mar - first green
-  { accent: "#7bbf6a", wash: "rgba(123, 191, 106, 0.06)" }, // Apr
-  { accent: "#9ac45c", wash: "rgba(154, 196, 92, 0.06)" },  // May
-  { accent: "#4fb3a6", wash: "rgba(79, 179, 166, 0.06)" },  // Jun
-  { accent: "#e8a33d", wash: "rgba(232, 163, 61, 0.06)" },  // Jul - high summer
-  { accent: "#e0873c", wash: "rgba(224, 135, 60, 0.06)" },  // Aug
-  { accent: "#c9772f", wash: "rgba(201, 119, 47, 0.06)" },  // Sep
-  { accent: "#d2652f", wash: "rgba(210, 101, 47, 0.07)" },  // Oct
-  { accent: "#a8613f", wash: "rgba(168, 97, 63, 0.06)" },   // Nov
-  { accent: "#5f93c4", wash: "rgba(95, 147, 196, 0.05)" },  // Dec
-];
-
-const DEFAULT_ACCENT = "#4285F4";
-
-function applyMonthTheme(monthNumber) {
-  const root = document.documentElement;
-  if (localStorage.getItem("calendar_themes") === "off") {
-    root.style.setProperty("--accent", DEFAULT_ACCENT);
-    root.style.setProperty("--month-wash", "transparent");
-    return;
-  }
-  const theme = MONTH_THEMES[(monthNumber - 1) % 12];
-  root.style.setProperty("--accent", theme.accent);
-  root.style.setProperty("--month-wash", theme.wash);
-}
-
 async function loadMonth() {
   const token = ++renderToken;
   applyMonthTheme(month);

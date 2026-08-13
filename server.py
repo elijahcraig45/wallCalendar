@@ -500,4 +500,13 @@ if __name__ == "__main__":
     # needing sign-in on another port must also override GOOGLE_OAUTH_REDIRECT_URI.
     import os
 
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
+    # Debug is OFF by default, and that matters here rather than being a nicety.
+    # This binds 0.0.0.0 on a device sitting on a household LAN, and Flask's debug
+    # mode serves the Werkzeug interactive debugger - a remote code execution
+    # console, PIN-gated but exposed - plus a file-watching reloader that doubles
+    # the process count on a Pi. Opt in explicitly when actually debugging.
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "5000")),
+        debug=os.environ.get("WALLCAL_DEBUG") == "1",
+    )
