@@ -8,25 +8,133 @@
 </head>
 <body>
   <div id="app">
-    <header id="top-bar">
-      <button id="menu-toggle" aria-label="Menu">&#9776;</button>
-      <div id="top-bar-content">
-        {% block topbar %}{% endblock %}
+    {# The rail is the launcher: every destination is one tap from anywhere,
+       with no drawer to open first. Each entry is a plain link so its target
+       can be repointed (e.g. Music to something other than /spotify) without
+       touching the shell. #}
+    <nav id="rail">
+      <a href="/today" class="rail-item" data-nav="/today">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 5v5.6l4.2 2.5-.8 1.3L11 13V7h2z"/></svg>
+        <span>Today</span>
+      </a>
+      <a href="/" class="rail-item" data-nav="/">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"/></svg>
+        <span>Calendar</span>
+      </a>
+      <a href="/notes" class="rail-item" data-nav="/notes">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zM7 8h10v2H7V8zm0 4h10v2H7v-2zm0 4h7v2H7v-2z"/></svg>
+        <span>Notes</span>
+      </a>
+      <a href="/recipes" class="rail-item" data-nav="/recipes">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8.1 2v7.2a2.9 2.9 0 0 0 2 2.7V22h1.8V11.9a2.9 2.9 0 0 0 2-2.7V2h-1.6v7.2h-.9V2h-1.6v7.2h-.9V2H8.1zm8.4 0c-.9 1.4-1.4 3-1.4 4.7 0 1.9.8 3.4 2 4V22h1.8V2h-2.4z"/></svg>
+        <span>Recipes</span>
+      </a>
+      <a href="/spotify" class="rail-item" data-nav="/spotify">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>
+        <span>Music</span>
+      </a>
+      <a href="/browser" class="rail-item" data-nav="/browser">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 17.93A8 8 0 0 1 4.07 13H7v2a2 2 0 0 0 2 2h2v2.93zm7.9-5.93A8 8 0 0 1 13 19.93V18a2 2 0 0 0-2-2H9v-2h5a2 2 0 0 0 2-2v-1h1.9c.06.33.1.66.1 1a8 8 0 0 1-.1 2zM17.5 8H16a2 2 0 0 0-2-2h-1V4.07A8 8 0 0 1 19.42 8H17.5z"/></svg>
+        <span>Web</span>
+      </a>
+      <div class="rail-spacer"></div>
+
+      {# What's playing, on every page. Previously the only now-playing UI lived
+         inside the Spotify page, so from the calendar you couldn't see or pause
+         the music without navigating away from the calendar. #}
+      <div id="rail-now-playing" class="rail-chip hidden">
+        <a id="rail-np-link" href="/spotify" aria-label="Open Music">
+          {# No src="" - an empty src renders as a broken-image icon in Chromium
+             until the first poll answers. #}
+          <img id="rail-np-art" alt="">
+        </a>
+        <div id="rail-np-title"></div>
+        <button id="rail-np-toggle" aria-label="Play or pause">
+          <svg id="rail-np-play" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5v14l11-7z"/></svg>
+          <svg id="rail-np-pause" viewBox="0 0 24 24" class="hidden"><path fill="currentColor" d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+        </button>
       </div>
-    </header>
-    <div id="nav-backdrop"></div>
-    <nav id="nav-drawer">
-      <a href="/" class="drawer-item">Calendar</a>
-      <a href="/spotify" class="drawer-item">Spotify</a>
-      <a href="/browser" class="drawer-item">Browser</a>
-      <a href="/accounts" class="drawer-item">Accounts</a>
+
+      <a href="/accounts" class="rail-item rail-item--last" data-nav="/accounts">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v3h16v-3c0-2.76-3.58-5-8-5z"/></svg>
+        <span>Accounts</span>
+      </a>
     </nav>
-    <main id="content">
-      {% block content %}{% endblock %}
-    </main>
+
+    <div id="stage">
+      <header id="top-bar">
+        <div id="clock" aria-live="off">
+          <div id="clock-time"></div>
+          <div id="clock-date"></div>
+        </div>
+        {# Beside the clock on every page, because "what's it doing outside" is a
+           glance question like the time is, not somewhere you navigate to. #}
+        <button id="weather-chip" class="hidden" aria-label="Weather">
+          <span id="weather-icon"></span>
+          <span id="weather-temp"></span>
+          <span id="weather-range"></span>
+        </button>
+        {# Timers belong to the shell, not to a page: a timer started from a recipe
+           has to keep running while someone walks over to the calendar. #}
+        <button id="timer-chip" aria-label="Timers">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42a11 11 0 0 0-1.41-1.41l-1.42 1.42A9 9 0 1 0 12 22a9 9 0 0 0 7.03-14.61zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>
+          <span id="timer-chip-text"></span>
+        </button>
+        <div id="top-bar-content">
+          {% block topbar %}{% endblock %}
+        </div>
+      </header>
+      {% if demo_mode %}
+      {# Wording stays generic across pages: the calendar refuses writes in demo
+         mode, but Spotify's fixtures accept playback commands, so "changes
+         disabled" would be wrong on the Music page. #}
+      <div id="demo-banner">Demo mode — synthetic data</div>
+      {% endif %}
+      <main id="content">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+
+    {# Dims the room-facing screen after dark instead of burning a lit calendar at
+       3am. Sits above everything and is dismissed by any touch. #}
+    <div id="night-dim" class="hidden" aria-hidden="true"></div>
+
+    <div id="timer-overlay" class="modal-overlay hidden">
+      <div id="timer-panel" class="modal-panel">
+        <button id="timer-close" aria-label="Close">&times;</button>
+        <h2>Timers</h2>
+        <div id="timer-presets"></div>
+        <form id="timer-form">
+          <input id="timer-label" class="text-input" type="text" placeholder="What for? (optional)">
+          <input id="timer-minutes" class="text-input" type="number" min="1" max="600" value="10" inputmode="numeric">
+          <button type="submit" class="pill-button pill-button--accent">Start</button>
+        </form>
+        <ul id="timer-list"></ul>
+      </div>
+    </div>
+
+    <div id="weather-overlay" class="modal-overlay hidden">
+      <div id="weather-panel" class="modal-panel">
+        <button id="weather-close" aria-label="Close">&times;</button>
+        <div id="weather-now"></div>
+        <div id="weather-forecast"></div>
+        <p id="weather-footnote" class="field-hint"></p>
+      </div>
+    </div>
+
     <div id="toast" class="hidden"></div>
   </div>
+  {# Order matters, and not arbitrarily:
+       panel.js   - initPanel, used by every overlay below
+       weather.js - defines onWeather(), which nav.js subscribes to for sunset
+       nav.js     - shell: clock, rail, now-playing, dimming, idle
+       timers.js  - uses showToast/wakeScreen from nav.js at runtime
+     panel.js used to live on the calendar page; the weather and timer overlays
+     are shell furniture, so it had to move up here. #}
+  <script src="/static/panel.js"></script>
+  <script src="/static/weather.js"></script>
   <script src="/static/nav.js"></script>
+  <script src="/static/timers.js"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

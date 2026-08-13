@@ -20,6 +20,13 @@ GOOGLE_SCOPES = [
     # requested explicitly because Google adds it server-side regardless;
     # omitting it here causes oauthlib to reject the granted-scope mismatch.
     "openid",
+    # Notes. Google Keep has no consumer API (Workspace-only, service account
+    # with domain-wide delegation), so notes are Google Tasks - which shows them
+    # on phones in the Tasks app and inside Google Calendar. Tokens issued before
+    # this scope existed keep working for the calendar and are refused by the
+    # Tasks API until the account is reconnected once; tasks_service turns that
+    # into an explained state rather than an error.
+    "https://www.googleapis.com/auth/tasks",
 ]
 
 SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID")
@@ -48,3 +55,26 @@ GOOGLE_OAUTH_REDIRECT_URI = os.environ.get(
     "GOOGLE_OAUTH_REDIRECT_URI", "http://127.0.0.1:5000/auth/google/callback"
 )
 FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "dev-insecure-change-me")
+
+# Demo mode swaps every Google Calendar read for synthetic fixtures (see
+# app/demo_data.py) so the layout can be developed and screenshot-verified
+# without touching anyone's real calendar. Writes are rejected rather than
+# faked - a demo run should never look like it saved something it didn't.
+DEMO_MODE = os.environ.get("WALLCAL_DEMO") == "1"
+
+# Weather location. Open-Meteo needs no key, so coordinates are the only config -
+# defaults to Atlanta. Override in .env with WALLCAL_LAT / WALLCAL_LON /
+# WALLCAL_PLACE (the label is cosmetic; only the coordinates affect the forecast).
+WEATHER_LAT = float(os.environ.get("WALLCAL_LAT", "33.749"))
+WEATHER_LON = float(os.environ.get("WALLCAL_LON", "-84.388"))
+WEATHER_LABEL = os.environ.get("WALLCAL_PLACE", "Atlanta")
+
+# Daisy's Kitchen (github.com/elijahcraig45/daisys-kitchen). Its Firestore rules
+# make the recipes collection publicly readable, so this project id is the only
+# configuration needed - no API key, no service account, nothing secret.
+RECIPES_PROJECT_ID = os.environ.get("WALLCAL_RECIPES_PROJECT", "recipe-f644f")
+
+# How many people the fixtures pretend are signed in. Defaults to 2 to
+# exercise per-person colors, but 1 is the state the real wall is in today
+# (a single signed-in account), so both are worth being able to render.
+DEMO_ACCOUNT_COUNT = int(os.environ.get("WALLCAL_DEMO_ACCOUNTS", "2"))

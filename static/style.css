@@ -1,13 +1,52 @@
 :root {
-  --header-height: 60px;
-  --weekday-row-height: 32px;
+  --header-height: clamp(54px, 8vh, 78px);
+  --weekday-row-height: clamp(22px, 3.4vh, 34px);
+  --rail-width: 92px;
   --bg: #111318;
   --surface: #1c1f26;
+  --surface-hi: #23272f;
   --border: #2c303a;
   --text: #f2f2f2;
   --text-dim: #8a8f9c;
   --accent: #4285F4;
   --spotify-green: #1DB954;
+
+  /* Plain px per breakpoint rather than clamp() on purpose: calendar.js reads
+     these back with getPropertyValue() to work out how many event pills fit in
+     a month cell, and a custom property holding a clamp() expression comes
+     back as the literal text "clamp(...)", not a resolved number. */
+  --pill-height: 22px;
+  --day-number-height: 30px;
+  --overflow-height: 17px;
+  /* A *floor*, not a target: the time grid stretches its hours to fill the
+     screen so a normal week needs no scrolling, and only falls back to this
+     minimum when the day's range is too wide to fit. */
+  --hour-height: 30px;
+  --gutter-width: 54px;
+  /* Set per month by calendar.js. A wash this faint is the whole seasonal effect
+     on the background; the accent carries the rest. */
+  --month-wash: transparent;
+}
+
+/* 1024x600 (official Pi 7" DSI) - the tightest target. */
+@media (max-height: 700px) {
+  :root {
+    --pill-height: 17px;
+    --day-number-height: 22px;
+    --overflow-height: 14px;
+    --hour-height: 26px;
+    --gutter-width: 42px;
+  }
+}
+
+/* 1080p and up, where a wall is read from further away. */
+@media (min-height: 1000px) {
+  :root {
+    --pill-height: 27px;
+    --day-number-height: 38px;
+    --overflow-height: 20px;
+    --hour-height: 36px;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -18,16 +57,216 @@ html, body {
   overflow: hidden;
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* "DejaVu Sans" is named explicitly because it's what Raspberry Pi OS
+     actually resolves to - leaving it to a bare `sans-serif` fallback means
+     dev and the wall can pick different metrics and disagree about what fits. */
+  font-family: -apple-system, "Segoe UI", Roboto, "DejaVu Sans", sans-serif;
   -webkit-tap-highlight-color: transparent;
+}
+
+/* Everything below sizes in rem, so this single rule scales the whole UI with
+   the panel: readable up close on a 1024x600 7", legible across a room on a
+   wall-mounted 1080p. */
+html {
+  font-size: clamp(13px, 1.15vh + 0.35vw, 19px);
 }
 
 #app {
   position: relative;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100vh;
 }
+
+/* ---------- launcher rail ---------- */
+
+#rail {
+  flex: 0 0 var(--rail-width);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 8px 0;
+  gap: 4px;
+}
+
+.rail-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 4px;
+  margin: 0 6px;
+  border-radius: 10px;
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.72rem;
+  min-height: 56px;
+  flex: 0 0 auto;
+}
+
+.rail-item svg {
+  width: clamp(20px, 2.6vh, 28px);
+  height: clamp(20px, 2.6vh, 28px);
+}
+
+.rail-item.active {
+  background: var(--surface-hi);
+  color: var(--text);
+}
+
+.rail-item.active svg { color: var(--accent); }
+
+/* Accounts is a settings destination, not a peer of the other three - pinning
+   it to the bottom keeps it out of the way of the things touched daily. */
+.rail-item--last { margin-top: auto; }
+
+/* Narrow panels can't afford 92px of chrome plus text labels. */
+@media (max-width: 1100px) {
+  :root { --rail-width: 62px; }
+  .rail-item span { display: none; }
+}
+
+#stage {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#demo-banner {
+  flex: 0 0 auto;
+  background: rgba(251, 188, 5, 0.15);
+  color: #ffd479;
+  font-size: 0.78rem;
+  text-align: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* ---------- wall clock ---------- */
+
+#clock {
+  flex: 0 0 auto;
+  padding: 0 14px 0 6px;
+  border-right: 1px solid var(--border);
+  margin-right: 12px;
+  line-height: 1.1;
+}
+
+#clock-time {
+  font-size: 1.6rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+#clock-date {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* ---------- weather ---------- */
+
+#weather-chip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 14px;
+  padding: 4px 10px 4px 4px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  line-height: 1.15;
+}
+
+#weather-chip.stale { opacity: 0.55; }
+
+#weather-icon svg {
+  width: clamp(22px, 3vh, 32px);
+  height: clamp(22px, 3vh, 32px);
+  display: block;
+  color: var(--accent);
+}
+
+#weather-temp {
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+#weather-range {
+  font-size: 0.74rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* Narrow panels: the header is already carrying a clock, month nav, view switcher
+   and actions. The temperature survives; the range is the first thing to go. */
+@media (max-width: 1100px) {
+  #weather-range { display: none; }
+}
+
+#weather-panel {
+  padding: 22px;
+  width: min(620px, 86vw);
+}
+
+#weather-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.8rem;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.weather-hero {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-bottom: 20px;
+}
+
+.weather-hero-icon svg {
+  width: clamp(52px, 9vh, 84px);
+  height: clamp(52px, 9vh, 84px);
+  color: var(--accent);
+}
+
+.weather-hero-temp {
+  font-size: 2.4rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.weather-hero-label { font-size: 1.05rem; margin-top: 4px; }
+.weather-hero-meta { font-size: 0.82rem; color: var(--text-dim); margin-top: 6px; }
+
+#weather-forecast {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.forecast-day {
+  text-align: center;
+  padding: 12px 6px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.forecast-name { font-size: 0.8rem; color: var(--text-dim); }
+.forecast-icon svg { width: 30px; height: 30px; margin: 6px 0; color: var(--accent); }
+.forecast-temps { font-size: 0.9rem; }
+.forecast-temps strong { font-weight: 600; }
+.forecast-precip { font-size: 0.74rem; color: var(--accent); margin-top: 2px; min-height: 1em; }
 
 #toast {
   position: fixed;
@@ -55,7 +294,7 @@ html, body {
   min-height: 0;
 }
 
-/* ---------- top bar + drawer nav ---------- */
+/* ---------- top bar ---------- */
 
 #top-bar {
   flex: 0 0 var(--header-height);
@@ -63,17 +302,7 @@ html, body {
   align-items: center;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  padding: 0 4px;
-}
-
-#menu-toggle {
-  background: none;
-  border: none;
-  color: var(--text);
-  font-size: 1.6rem;
-  min-width: 44px;
-  min-height: 44px;
-  flex: 0 0 auto;
+  padding: 0 8px;
 }
 
 #top-bar-content {
@@ -81,12 +310,12 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 8px;
+  gap: 12px;
   min-width: 0;
 }
 
 #top-bar-content h1 {
-  font-size: 1.4rem;
+  font-size: 1.35rem;
   margin: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -96,13 +325,50 @@ html, body {
 .topbar-actions {
   display: flex;
   align-items: center;
+  flex: 0 0 auto;
 }
 
 .month-nav {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
+  flex: 1;
+}
+
+.pill-button {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 19px;
+  border: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  font-size: 0.85rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+#stale-badge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: rgba(251, 188, 5, 0.15);
+  color: #ffd479;
+  font-size: 0.74rem;
+  white-space: nowrap;
+}
+
+.pill-button--accent {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
 }
 
 #refresh-toggle,
@@ -129,53 +395,6 @@ html, body {
   background: #ea4335;
 }
 
-#nav-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 0.25s ease;
-  z-index: 999;
-}
-
-#nav-backdrop.open {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-#nav-drawer {
-  position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  width: 70vw;
-  max-width: 280px;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  transform: translateX(-100%);
-  transition: transform 0.25s ease;
-  z-index: 1000;
-  padding-top: var(--header-height);
-  display: flex;
-  flex-direction: column;
-}
-
-#nav-drawer.open {
-  transform: translateX(0);
-}
-
-.drawer-item {
-  display: block;
-  padding: 18px 24px;
-  color: var(--text);
-  text-decoration: none;
-  font-size: 1.2rem;
-  min-height: 44px;
-}
-
-.drawer-item:active { color: var(--accent); }
-
 .nav-arrow {
   background: none;
   border: none;
@@ -193,27 +412,35 @@ html, body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* anchors .empty-state's absolute fill */
+  position: relative;
 }
 
+/* A segmented control in the top bar, not a full-width tab row - in landscape
+   the bar has horizontal room to spare and vertical space is the scarce axis. */
 #view-switcher {
   flex: 0 0 auto;
   display: flex;
-  border-bottom: 1px solid var(--border);
+  gap: 2px;
+  padding: 3px;
+  border-radius: 12px;
+  background: var(--bg);
 }
 
 .view-tab {
-  flex: 1;
-  min-height: 44px;
+  min-height: 34px;
+  padding: 0 clamp(8px, 1.1vw, 18px);
+  border-radius: 9px;
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
   color: var(--text-dim);
-  font-size: 0.95rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
 }
 
 .view-tab[aria-selected="true"] {
   color: var(--text);
-  border-bottom-color: var(--accent);
+  background: var(--surface-hi);
 }
 
 .week-day-row,
@@ -270,7 +497,7 @@ html, body {
   display: none;
 }
 
-/* Shared by #month-grid/#week-view/#agenda-view so switching views never
+/* Shared by #month-grid/#timegrid/#agenda-view so switching views never
    needs an ID-scoped `display` rule - an ID would beat the .hidden class
    toggle regardless of source order (the exact bug already hit once with
    #day-overlay, since fixed by keying visibility off classes instead). */
@@ -282,43 +509,51 @@ html, body {
 
 .calendar-pane--grid {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  grid-template-rows: repeat(6, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  /* grid-template-rows is set by calendar.js from the actual number of weeks -
+     hardcoding 6 left a permanently empty row on months that fit in 5. */
   gap: 1px;
   background: var(--border);
+  overflow: hidden;
 }
 
 .day-cell {
   background: var(--surface);
-  padding: 4px;
+  padding: 3px 4px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 44px;
+  min-height: 0;
 }
 
-.day-cell.outside-month { opacity: 0.35; }
+.day-cell.outside-month { opacity: 0.3; }
+.day-cell.today { background: var(--surface-hi); }
 .day-cell.today .day-number {
   background: var(--accent);
   color: #fff;
-  border-radius: 50%;
+  border-radius: 999px;
 }
 
 .day-number {
-  font-size: 0.85rem;
-  width: 22px;
-  height: 22px;
-  display: flex;
+  font-size: 0.82rem;
+  height: var(--day-number-height);
+  min-width: var(--day-number-height);
+  padding: 0 2px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  align-self: flex-start;
   flex: 0 0 auto;
 }
 
 .event-pill {
-  font-size: 0.7rem;
-  padding: 1px 4px;
-  margin-top: 2px;
-  border-radius: 3px;
+  height: var(--pill-height);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.72rem;
+  padding: 0 5px;
+  border-radius: 4px;
   color: #fff;
   white-space: nowrap;
   overflow: hidden;
@@ -326,15 +561,48 @@ html, body {
   flex: 0 0 auto;
 }
 
-.event-overflow {
-  font-size: 0.65rem;
+/* Timed events read as dot + time + title on the cell background; only all-day
+   events get a solid color bar. A dense day is then a readable list rather
+   than a stack of near-identical color blocks. */
+.event-pill--timed {
+  background: none !important;
+  color: var(--text);
+  padding-left: 1px;
+}
+
+.event-pill--timed .event-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.event-pill-time {
   color: var(--text-dim);
-  margin-top: 2px;
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The pill's title is always its own element, never text directly on .event-pill:
+   .event-pill is a flex container, and text-overflow has no effect on a flex
+   container's own text, so a long all-day title clipped mid-word rather than
+   ellipsising. (`overflow: hidden` here also zeroes this flex item's automatic
+   minimum size, so no explicit min-width is needed for it to shrink.) */
+.event-pill-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-overflow {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  padding: 0 4px;
+  flex: 0 0 auto;
 }
 
 #day-overlay-panel {
-  padding: 20px;
-  width: 85%;
+  padding: 22px;
+  width: min(560px, 80vw);
+  max-height: 82vh;
 }
 
 #day-overlay-close {
@@ -407,9 +675,273 @@ html, body {
   align-items: center;
 }
 
-/* ---------- spotify home ---------- */
+/* ---------- time grid (week + day) ----------
+   `display` is class-scoped, matching the .calendar-pane convention above, so
+   the .hidden toggle at the bottom of this file can still beat it. */
 
-#device-toggle {
+.calendar-pane--split {
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+}
+
+.timegrid-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#timegrid { --day-count: 7; }
+
+/* Day view's companion pane: the same event cards the day overlay uses, so
+   location and whose calendar it is are readable without opening anything. */
+#day-detail {
+  flex: 0 0 clamp(230px, 26%, 380px);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+#day-detail-header {
+  padding: 10px 16px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+}
+
+/* Deliberately not .row-list: that class lays each li out as a horizontal flex
+   row, which flattens an event card's time/title/meta onto one line. */
+#day-detail-list {
+  list-style: none;
+  margin: 0;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#timegrid-head,
+#timegrid-allday {
+  flex: 0 0 auto;
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+
+.timegrid-gutter-cell {
+  flex: 0 0 var(--gutter-width);
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+  font-size: 0.62rem;
+  color: var(--text-dim);
+  border-right: 1px solid var(--border);
+}
+
+#timegrid-head-days,
+#timegrid-allday-cols {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--day-count), minmax(0, 1fr));
+}
+
+.timegrid-day-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 4px;
+  border-right: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.timegrid-day-weekday {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.timegrid-day-number {
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.timegrid-day-head.today { color: var(--accent); }
+.timegrid-day-head.today .timegrid-day-number {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 999px;
+  min-width: 1.7em;
+  text-align: center;
+}
+
+.timegrid-allday-col {
+  border-right: 1px solid var(--border);
+  padding: 3px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  /* All-day events are capped at roughly three rows so a busy holiday week
+     can't push the timed grid off the bottom of the screen. */
+  max-height: calc(var(--pill-height) * 3 + 14px);
+  overflow-y: auto;
+}
+
+#timegrid-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+#timegrid-body {
+  display: flex;
+  align-items: stretch;
+}
+
+#timegrid-gutter {
+  flex: 0 0 var(--gutter-width);
+  position: relative;
+  border-right: 1px solid var(--border);
+}
+
+.hour-label {
+  position: absolute;
+  right: 6px;
+  transform: translateY(-50%);
+  font-size: 0.66rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+#timegrid-cols {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--day-count), minmax(0, 1fr));
+}
+
+.timegrid-col {
+  position: relative;
+  border-right: 1px solid var(--border);
+}
+
+.timegrid-col.today { background: rgba(66, 133, 244, 0.07); }
+
+.hour-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: var(--border);
+}
+
+.event-block {
+  position: absolute;
+  border-radius: 5px;
+  padding: 1px 5px;
+  overflow: hidden;
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+
+.event-block-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.event-block-time {
+  font-size: 0.62rem;
+  opacity: 0.85;
+  white-space: nowrap;
+}
+
+/* A block at its minimum height has room for one line, and the title is the
+   line worth keeping - the start time is already implied by its position
+   against the hour rules. */
+.event-block--compact {
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+}
+
+.event-block--compact .event-block-time { display: none; }
+
+.now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #ff5252;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.now-line::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff5252;
+}
+
+/* ---------- agenda ---------- */
+
+/* Balanced columns rather than one tall list: on a landscape wall a single
+   column would use a third of the width and hide most of the month. Each
+   column still reads top-to-bottom in date order. */
+.agenda-columns {
+  column-width: 320px;
+  column-gap: 28px;
+  padding: 14px 18px;
+  list-style: none;
+  margin: 0;
+}
+
+.agenda-columns .agenda-day-group {
+  break-inside: avoid;
+  padding: 0 0 14px;
+  border-bottom: none;
+}
+
+/* ---------- empty state ---------- */
+
+.empty-state {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  text-align: center;
+  background: var(--bg);
+}
+
+.empty-state h2 { margin: 0; font-size: 1.4rem; }
+.empty-state p { margin: 0; color: var(--text-dim); }
+
+/* ---------- spotify: two-pane landscape layout ----------
+   Now-playing holds permanent screen space on the left; browse and every detail
+   view share the column on the right. Replaces a mini-player that expanded to a
+   full-screen overlay plus four bottom sheets - all phone idioms that wasted the
+   width and covered the thing you were looking at. */
+
+#device-toggle,
+#queue-toggle {
   background: none;
   border: none;
   color: var(--text);
@@ -420,20 +952,67 @@ html, body {
   justify-content: center;
 }
 
-#spotify-home {
+#spotify-layout {
   flex: 1;
-  display: flex;
-  flex-direction: column;
   min-height: 0;
+  display: flex;
+  flex-direction: row;
 }
 
-#home-search-row {
+#nowplaying-pane {
+  position: relative;
+  flex: 0 0 clamp(320px, 34%, 460px);
+  min-width: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--border);
+}
+
+#nowplaying-inner {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(6px, 1.4vh, 16px);
+  padding: clamp(10px, 2vh, 24px) 14px;
+  text-align: center;
+}
+
+#browse-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+#browse-header {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+}
+
+#browse-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* Class-scoped display, per the convention documented above .calendar-pane, so
+   the .hidden toggle at the end of this file still wins. */
+.browse-view {
+  display: block;
+}
+
+#home-search-row {
+  flex: 1;
+  display: flex;
+  align-items: center;
   gap: 8px;
-  margin: 12px 16px;
-  padding: 0 12px;
+  padding: 0 14px;
   min-height: 44px;
   background: var(--surface);
   border-radius: 22px;
@@ -450,14 +1029,6 @@ html, body {
 }
 
 #search-input:focus { outline: none; }
-
-#home-scroll {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  /* leaves room so the last row of tiles doesn't sit under the mini-player */
-  padding-bottom: 76px;
-}
 
 #search-results {
   padding-top: 4px;
@@ -537,9 +1108,12 @@ html, body {
   font-weight: 700;
 }
 
+/* Both grids auto-fill instead of being a fixed 2 columns / a horizontal strip:
+   the browse column is wide on a landscape panel, and a horizontal scroll strip
+   is an awkward gesture on a wall-mounted screen. */
 .quick-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
   gap: 8px;
 }
 
@@ -547,14 +1121,14 @@ html, body {
   display: flex;
   align-items: center;
   background: rgba(255, 255, 255, 0.06);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
-  height: 56px;
+  height: 60px;
 }
 
 .quick-tile img {
-  width: 56px;
-  height: 56px;
+  width: 60px;
+  height: 60px;
   object-fit: cover;
   background: var(--surface);
   flex: 0 0 auto;
@@ -566,24 +1140,23 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
 }
 
-.tile-strip {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-  padding-bottom: 4px;
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 132px), 1fr));
+  gap: 14px;
 }
 
 .tile {
-  flex: 0 0 auto;
-  width: 96px;
   text-align: left;
+  min-width: 0;
 }
 
 .tile img {
-  width: 96px;
-  height: 96px;
+  width: 100%;
+  aspect-ratio: 1;
   border-radius: 8px;
   object-fit: cover;
   background: var(--surface);
@@ -591,96 +1164,80 @@ html, body {
 }
 
 .tile-label {
-  font-size: 0.75rem;
-  margin-top: 4px;
+  font-size: 0.8rem;
+  margin-top: 6px;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  width: 96px;
 }
 
-/* ---------- mini-player ---------- */
+/* ---------- rail now-playing chip ---------- */
 
-#mini-player {
-  position: fixed;
-  left: 8px;
-  right: 8px;
-  bottom: 8px;
-  height: 60px;
+/* `display` lives on a class, not on #rail-now-playing: an ID-scoped display
+   rule outranks the .hidden toggle no matter the source order, which is exactly
+   how this chip first shipped visible on the Music page where it's suppressed.
+   Same convention as .calendar-pane / .browse-view. */
+.rail-chip {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 0 8px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  z-index: 500;
 }
 
-#mini-player.hidden { display: none; }
+#rail-now-playing {
+  flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  margin: 0 6px 4px;
+  border-radius: 10px;
+  background: var(--surface-hi);
+}
 
-#mini-art {
-  width: 44px;
-  height: 44px;
+#rail-np-art {
+  width: 40px;
+  height: 40px;
   border-radius: 6px;
   object-fit: cover;
   background: var(--bg);
-  flex: 0 0 auto;
+  display: block;
 }
 
-#mini-text {
-  flex: 1;
-  min-width: 0;
-}
-
-#mini-title {
-  font-size: 0.9rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#mini-artist {
-  font-size: 0.78rem;
+#rail-np-title {
+  font-size: 0.62rem;
   color: var(--text-dim);
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-#mini-play-pause {
+#rail-np-toggle {
   background: none;
   border: none;
   color: var(--text);
-  min-width: 44px;
-  min-height: 44px;
+  min-width: 40px;
+  min-height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 auto;
 }
 
-#mini-play-pause svg {
-  width: 26px;
-  height: 26px;
-  fill: currentColor;
+#rail-np-toggle svg { width: 20px; height: 20px; }
+
+/* The rail's nav links sit at the top and Accounts at the bottom; this holds the
+   gap open so the chip appearing and disappearing doesn't move Accounts. */
+.rail-spacer { flex: 1; min-height: 8px; }
+
+/* Labels are hidden on narrow panels, and the chip's title goes with them. */
+@media (max-width: 1100px) {
+  #rail-np-title { display: none; }
 }
 
-/* ---------- full-screen now playing ---------- */
-
-#nowplaying-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-}
-
-#nowplaying-overlay.hidden { display: none; }
+/* ---------- now-playing pane ---------- */
 
 #backdrop-blur {
-  position: fixed;
-  inset: -30px;
+  position: absolute;
+  inset: -40px;
   background-size: cover;
   background-position: center;
   background-color: var(--bg);
@@ -689,54 +1246,60 @@ html, body {
   z-index: 0;
 }
 
-#nowplaying-header {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 4px 0;
-}
-
-#nowplaying-collapse,
-#queue-toggle {
-  background: none;
-  border: none;
-  color: var(--text);
-  min-width: 44px;
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-#nowplaying-collapse {
-  font-size: 1.4rem;
-}
-
-#spotify-main {
-  position: relative;
-  z-index: 1;
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  padding: 8px 24px 8px;
-}
-
 #album-art {
-  width: 60vw;
-  max-width: 300px;
+  /* Square, and bounded by height rather than width so it can't crowd out the
+     transport controls on a short panel. */
+  width: min(100%, 34vh);
+  aspect-ratio: 1;
+  object-fit: cover;
   border-radius: 12px;
-  margin-bottom: 24px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+  flex: 0 1 auto;
+  min-height: 0;
 }
 
-#track-title { margin: 0 0 6px; font-size: 1.4rem; }
-#track-artist { margin: 0 0 20px; color: var(--text-dim); font-weight: normal; font-size: 1.1rem; }
+#track-title {
+  margin: clamp(4px, 1.2vh, 14px) 0 0;
+  font-size: clamp(1rem, 2.4vh, 1.5rem);
+  line-height: 1.2;
+  /* Two lines then ellipsis - long track names are common and must not push the
+     transport controls off the bottom of the pane. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+#track-artist {
+  margin: 0;
+  color: var(--text-dim);
+  font-weight: normal;
+  font-size: clamp(0.8rem, 1.7vh, 1.1rem);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+#device-current {
+  gap: 7px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+#device-current-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 #device-panel-header {
+  /* Pane headers scroll with their list; a sheet header didn't.
+     Sticky keeps Play/Shuffle reachable on a long playlist. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -762,7 +1325,6 @@ html, body {
   list-style: none;
   margin: 0;
   padding: 8px 0;
-  overflow-y: auto;
 }
 
 #device-list li {
@@ -774,6 +1336,17 @@ html, body {
 }
 
 #device-list li.active { color: var(--spotify-green); }
+
+.device-note {
+  display: block;
+  color: #ffd479;
+  background: rgba(251, 188, 5, 0.12);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  margin: 0 16px 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
 
 .device-icon {
   flex: 0 0 auto;
@@ -792,12 +1365,12 @@ html, body {
 
 #progress-container {
   width: 100%;
-  max-width: 320px;
-  margin-bottom: 20px;
+  max-width: 420px;
+  flex: 0 0 auto;
   /* The visible bar stays 4px tall, but the tappable/seekable region needs
      to clear the 44px touch-target minimum - padding extends the hit area
      without changing what's painted. */
-  padding: 16px 0;
+  padding: 14px 0;
   touch-action: none;
 }
 
@@ -824,50 +1397,47 @@ html, body {
   color: var(--text-dim);
 }
 
+/* Sized off viewport height, not fixed px: five buttons plus gaps have to fit
+   the width of a ~320px pane on a 1024x600 panel while still being big enough
+   to hit from arm's length on a 1080p wall. */
 #transport-controls {
   display: flex;
   align-items: center;
-  gap: 28px;
+  justify-content: center;
+  gap: clamp(6px, 1.6vw, 22px);
+  flex: 0 0 auto;
+  max-width: 100%;
 }
 
 .transport-btn {
   background: rgba(255, 255, 255, 0.08);
   border: none;
   color: var(--text);
-  width: 56px;
-  height: 56px;
+  width: clamp(44px, 6.4vh, 58px);
+  height: clamp(44px, 6.4vh, 58px);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 auto;
 }
 
 .transport-btn svg {
-  width: 24px;
-  height: 24px;
+  width: 55%;
+  height: 55%;
   fill: currentColor;
 }
 
 .transport-btn-main {
-  width: 76px;
-  height: 76px;
+  width: clamp(56px, 8.4vh, 78px);
+  height: clamp(56px, 8.4vh, 78px);
   background: var(--spotify-green);
   color: #0b0b0b;
 }
 
-.transport-btn-main svg {
-  width: 30px;
-  height: 30px;
-}
-
 .transport-btn-small {
-  width: 36px;
-  height: 36px;
-}
-
-.transport-btn-small svg {
-  width: 18px;
-  height: 18px;
+  width: clamp(34px, 4.6vh, 42px);
+  height: clamp(34px, 4.6vh, 42px);
 }
 
 .transport-btn-small.active {
@@ -880,8 +1450,9 @@ html, body {
   align-items: center;
   gap: 10px;
   width: 100%;
-  max-width: 320px;
-  margin-top: 24px;
+  max-width: 420px;
+  flex: 0 0 auto;
+  padding: 14px 0;
   color: var(--text-dim);
 }
 
@@ -914,17 +1485,17 @@ html, body {
   border: none;
 }
 
-/* ---------- playlist detail ---------- */
-
-/* playlist/artist/queue panels want more height than the .sheet-panel
-   default (60vh) for their longer track/album lists */
-#playlist-panel,
-#artist-panel,
-#queue-panel {
-  max-height: 80vh;
-}
+/* ---------- browse detail views ----------
+   These were bottom sheets with their own height caps; as panes they simply fill
+   the browse column and scroll with it, so the caps are gone. */
 
 #playlist-panel-header {
+  /* Pane headers scroll with their list; a sheet header didn't.
+     Sticky keeps Play/Shuffle reachable on a long playlist. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -980,14 +1551,15 @@ html, body {
   flex: 0 0 auto;
 }
 
-#playlist-tracks {
+#playlist-tracks,
+#queue-tracks {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
 }
 
-#playlist-tracks li {
+#playlist-tracks li,
+#queue-tracks li {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -996,7 +1568,8 @@ html, body {
   min-height: 44px;
 }
 
-#playlist-tracks li img {
+#playlist-tracks li img,
+#queue-tracks li img {
   width: 44px;
   height: 44px;
   border-radius: 4px;
@@ -1010,9 +1583,30 @@ html, body {
   justify-content: center;
 }
 
+.track-list-error {
+  display: block;
+  color: #ff8a80;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  padding: 14px 16px;
+}
+
+/* Looks like .playlist-loading but means something entirely different - the
+   currently playing track at the top of the queue. */
+.queue-current {
+  color: var(--text-dim);
+  justify-content: center;
+}
+
 /* ---------- artist detail ---------- */
 
 #artist-panel-header {
+  /* Pane headers scroll with their list; a sheet header didn't.
+     Sticky keeps Play/Shuffle reachable on a long playlist. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1053,7 +1647,6 @@ html, body {
   list-style: none;
   margin: 0;
   padding: 0;
-  overflow-y: auto;
 }
 
 #artist-albums li {
@@ -1078,14 +1671,54 @@ html, body {
 
 #browser-view {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 24px;
+  gap: 12px;
+  padding: 14px 16px;
 }
 
 #browser-form {
   display: flex;
   gap: 8px;
+  flex: 0 0 auto;
+}
+
+#browser-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.browser-status {
+  flex: 0 0 auto;
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  background: var(--surface);
+  color: var(--text-dim);
+}
+
+.browser-status--error {
+  background: rgba(234, 67, 53, 0.14);
+  color: #ff8a80;
+}
+
+#browser-frame-wrap {
+  flex: 1;
+  min-height: 0;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+#browser-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
 }
 
 #browser-url {
@@ -1113,9 +1746,15 @@ html, body {
    Used by the account/calendar-visibility/add-event UI (and the retrofitted
    day-overlay). Keying visibility off these classes rather than an element's
    own ID sidesteps the specificity issue an ID-scoped display rule would
-   otherwise need (an ID always beats a plain class). Spotify's three
-   existing overlays (#device-*/#playlist-*/#artist-*) are left as their own
-   bespoke ID-scoped rules above - working code, no benefit to retrofitting. */
+   otherwise need (an ID always beats a plain class).
+
+   Careful with wildcards in comments here. This block used to name Spotify's
+   overlays as "#device-x/#playlist-x/#artist-x" using asterisks instead of x -
+   and the asterisk-slash in the middle of that closed the comment early. The
+   trailing text then parsed as a broken selector, whose error recovery swallowed
+   the whole .modal-overlay rule below. It was silently dead for as long as that
+   comment existed: the day-event overlay rendered inline in the page instead of
+   as a centered modal, and nothing failed loudly enough to notice. */
 
 .modal-overlay {
   position: fixed;
@@ -1137,12 +1776,15 @@ html, body {
   position: relative;
 }
 
+/* Centered rather than bottom-anchored: a bottom sheet is a phone idiom, and
+   on a short landscape panel it puts the form's controls at the very bottom
+   edge of the screen. */
 .sheet-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.7);
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: center;
   z-index: 1100;
 }
@@ -1151,16 +1793,16 @@ html, body {
 
 .sheet-panel {
   background: var(--surface);
-  border-radius: 12px 12px 0 0;
+  border-radius: 14px;
   width: 100%;
-  max-width: 420px;
-  max-height: 60vh;
+  max-width: 520px;
+  max-height: 82vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
 }
 
-.sheet-panel--tall { max-height: 85vh; max-width: 560px; }
+.sheet-panel--tall { max-height: 90vh; max-width: 640px; }
 
 .field-row {
   flex-wrap: wrap;
@@ -1383,8 +2025,378 @@ textarea.text-input {
   line-height: 44px;
 }
 
-/* Must stay the last rule in the file: with equal specificity, the later
-   rule wins cascade ties, and several classes above (.field-row, .field,
-   .sheet-panel, etc.) also set `display`. Keeping .hidden last guarantees
-   it always wins regardless of what else is combined with it. */
-.hidden { display: none; }
+/* ---------- monthly theme wash ---------- */
+
+/* Applied to the stage rather than body so the rail stays neutral - a tinted rail
+   would fight the accent rather than support it. */
+#stage { background-image: linear-gradient(var(--month-wash), var(--month-wash)); }
+
+/* ---------- night dimming ---------- */
+
+#night-dim {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  /* Slow enough not to look like a glitch, quick enough to feel responsive. */
+  transition: opacity 1.2s ease;
+  z-index: 3000;
+}
+
+/* ---------- timers ---------- */
+
+#timer-chip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 12px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 10px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 0.86rem;
+  font-variant-numeric: tabular-nums;
+}
+
+#timer-chip svg { width: 20px; height: 20px; }
+#timer-chip.running { color: var(--text); background: var(--surface-hi); }
+
+#timer-chip.ringing {
+  color: #0b0b0b;
+  background: var(--spotify-green);
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+
+@keyframes timer-pulse {
+  50% { opacity: 0.55; }
+}
+
+#timer-panel { padding: 22px; width: min(520px, 88vw); }
+#timer-panel h2 { margin: 0 0 14px; font-size: 1.2rem; }
+
+#timer-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.8rem;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+#timer-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+#timer-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+#timer-form #timer-label { flex: 1; }
+#timer-form #timer-minutes { width: 92px; flex: 0 0 auto; text-align: center; }
+
+#timer-list { list-style: none; margin: 0; padding: 0; }
+
+.timer-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.timer-text { flex: 1; min-width: 0; }
+.timer-time { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.timer-name { font-size: 0.82rem; color: var(--text-dim); }
+.timer-row--done .timer-time { color: var(--spotify-green); }
+.timer-empty { color: var(--text-dim); font-size: 0.9rem; padding: 10px 0; }
+
+/* ---------- notes ---------- */
+
+#notes-view {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px clamp(16px, 6vw, 120px);
+}
+
+#note-form { display: flex; gap: 8px; flex: 0 0 auto; }
+#note-form #note-input { flex: 1; }
+
+#notes-reauth {
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: rgba(251, 188, 5, 0.12);
+  color: #ffd479;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+#notes-reauth p { margin: 0; line-height: 1.45; }
+
+#notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.note-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.note-check {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 2px solid var(--border);
+  background: none;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.note-check svg { width: 20px; height: 20px; }
+.note-row--done .note-check { border-color: var(--accent); }
+.note-row--done .note-text { color: var(--text-dim); text-decoration: line-through; }
+
+.note-text { flex: 1; min-width: 0; font-size: 1.05rem; }
+.note-sub { font-size: 0.82rem; color: var(--text-dim); text-decoration: none; }
+
+.note-delete {
+  flex: 0 0 auto;
+  min-width: 40px;
+  min-height: 40px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font-size: 1.5rem;
+}
+
+.note-empty { color: var(--text-dim); padding: 16px 4px; }
+
+/* ---------- recipes ---------- */
+
+#recipes-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+#recipes-browse { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px 16px; }
+
+#recipes-filters { display: flex; flex-wrap: wrap; gap: 8px; flex: 0 0 auto; }
+
+#recipes-grid {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr));
+  gap: 14px;
+  align-content: start;
+}
+
+.recipe-card {
+  display: flex;
+  flex-direction: column;
+  border: none;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  padding: 0;
+}
+
+.recipe-art {
+  aspect-ratio: 4 / 3;
+  background: var(--surface-hi);
+  overflow: hidden;
+}
+
+.recipe-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.recipe-art--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.2rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.recipe-card-meta { padding: 10px 12px 12px; }
+.recipe-card-title { font-size: 0.95rem; line-height: 1.3; }
+.recipe-card-sub { font-size: 0.78rem; color: var(--text-dim); margin-top: 4px; }
+
+#recipe-detail { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 14px 18px; overflow-y: auto; }
+.recipe-detail-title { font-size: 1.6rem; }
+.recipe-detail-sub { font-size: 0.85rem; color: var(--text-dim); margin-top: 4px; }
+.recipe-detail-desc { color: var(--text-dim); line-height: 1.5; max-width: 70ch; }
+
+/* Ingredients beside the method, which is how a cook reads it. */
+#recipe-detail-body {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr);
+  gap: 28px;
+  margin-top: 14px;
+}
+
+@media (max-width: 900px) {
+  #recipe-detail-body { grid-template-columns: 1fr; gap: 16px; }
+}
+
+#recipe-detail-body h3 { margin: 0 0 10px; font-size: 1rem; color: var(--text-dim); }
+
+.ingredient-list { list-style: none; margin: 0; padding: 0; }
+.ingredient-list li { padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 0.95rem; }
+.ingredient-amount { color: var(--accent); margin-right: 8px; }
+
+.step-list { margin: 0; padding-left: 22px; }
+.step-list li { padding: 8px 0; line-height: 1.55; font-size: 0.98rem; }
+.step-title { font-weight: 600; margin-bottom: 2px; }
+.recipe-notes { margin-top: 14px; color: var(--text-dim); font-style: italic; line-height: 1.5; }
+
+/* Cooking mode: read from across a counter, hands busy. */
+#cook-mode {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(14px, 3vh, 32px) clamp(18px, 6vw, 90px);
+  gap: 16px;
+}
+
+#cook-progress { flex: 0 0 auto; color: var(--text-dim); font-size: 0.9rem; }
+#cook-step { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; }
+.cook-step-title { font-size: clamp(1rem, 2.4vh, 1.4rem); color: var(--accent); margin-bottom: 8px; }
+.cook-step-text { font-size: clamp(1.25rem, 4.4vh, 2.6rem); line-height: 1.35; }
+
+#cook-controls { flex: 0 0 auto; display: flex; gap: 10px; }
+#cook-controls .pill-button { min-height: 52px; padding: 0 22px; font-size: 1rem; }
+#cook-controls button:disabled { opacity: 0.4; }
+
+#cook-ingredients {
+  flex: 0 0 auto;
+  list-style: none;
+  margin: 0;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  max-height: 22vh;
+  overflow-y: auto;
+}
+
+/* ---------- today / morning overview ---------- */
+
+#today-view {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr);
+  gap: 18px;
+  padding: 16px 18px;
+}
+
+@media (max-width: 1000px) {
+  #today-view { grid-template-columns: 1fr; overflow-y: auto; }
+}
+
+#today-primary { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr); gap: 18px; min-height: 0; }
+
+@media (max-width: 1400px) {
+  #today-primary { grid-template-columns: 1fr; }
+}
+
+#today-weather {
+  padding: 18px;
+  border-radius: 12px;
+  background: var(--surface);
+  text-align: center;
+  align-self: start;
+}
+
+.today-weather-icon svg { width: clamp(56px, 10vh, 96px); height: clamp(56px, 10vh, 96px); color: var(--accent); }
+.today-weather-temp { font-size: clamp(2rem, 5vh, 3.2rem); font-weight: 600; line-height: 1; }
+.today-weather-label { font-size: 1rem; margin-top: 6px; }
+.today-weather-range, .today-weather-sun { font-size: 0.82rem; color: var(--text-dim); margin-top: 6px; }
+
+#today-schedule, #today-notes-block, #today-next-block { min-height: 0; display: flex; flex-direction: column; }
+#today-view h3 { margin: 0 0 10px; font-size: 0.92rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+
+#today-events, #today-notes, #today-next {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+#today-secondary { display: grid; grid-template-rows: 1fr 1fr; gap: 18px; min-height: 0; }
+
+.today-event {
+  border-left: 4px solid var(--accent);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.today-event--past { opacity: 0.45; }
+.today-event-when { font-size: 0.8rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.today-event-title { font-size: 1.05rem; margin: 2px 0 2px; }
+.today-event-meta { font-size: 0.78rem; color: var(--text-dim); }
+
+.today-note {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.95rem;
+}
+
+.today-empty { color: var(--text-dim); font-size: 0.9rem; padding: 8px 0; }
+.today-empty a { color: var(--accent); }
+
+/* Rail is taller now (Today/Calendar/Notes/Recipes/Music/Web/Accounts); on a
+   600px panel the items have to give up some padding to all fit. */
+@media (max-height: 700px) {
+  .rail-item { min-height: 44px; padding: 6px 4px; }
+  #rail { gap: 2px; }
+}
+
+/* `!important`, and it's the right call for exactly this rule.
+
+   .hidden is the one utility the whole app toggles from JavaScript, and source
+   order only wins ties against equal specificity - any `#thing { display: flex }`
+   silently outranks it. That trap has now been hit four separate times (the rail
+   now-playing chip shipped visible on the Music page; all three Recipes views
+   rendered stacked on top of each other; the stale badge and weather chip could
+   not be hidden at all). Each time the element was there in the markup and simply
+   would not go away, which is a miserable thing to debug.
+
+   The alternative - remembering forever to keep `display` off every ID that might
+   one day be hidden - has already failed repeatedly. Making the utility
+   unconditional is the fix. Kept last in the file regardless, so the ordering
+   argument holds too. */
+.hidden { display: none !important; }

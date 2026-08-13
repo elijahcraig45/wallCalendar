@@ -1,17 +1,59 @@
 import datetime as dt
 
+import requests.exceptions
 from flask import Flask, jsonify, redirect, render_template, request, session
 from google.auth.exceptions import GoogleAuthError
 from googleapiclient.errors import HttpError
 from spotipy.exceptions import SpotifyException
 
-from app import calendar_service, preferences, spotify_service
+from app import (
+    browser_service,
+    calendar_service,
+    demo_data,
+    preferences,
+    recipes_service,
+    spotify_service,
+    tasks_service,
+    weather_service,
+)
 from app.auth import google_auth
 from app.auth.errors import classify
-from app.config import FLASK_SECRET_KEY
+from app.config import DEMO_MODE, FLASK_SECRET_KEY
 
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET_KEY
+
+
+@app.context_processor
+def inject_globals():
+    # Lets every template render the demo-mode banner without each view
+    # having to remember to pass the flag through.
+    return {"demo_mode": DEMO_MODE}
+
+
+@app.errorhandler(calendar_service.DemoModeError)
+def handle_demo_mode_error(e):
+    return jsonify({"error": str(e)}), 403
+
+
+@app.errorhandler(spotify_service.SpotifyForbidden)
+def handle_spotify_forbidden(e):
+    return jsonify({"error": str(e)}), 403
+
+
+@app.errorhandler(spotify_service.SpotifyNotConfigured)
+def handle_spotify_not_configured(e):
+    return jsonify({"error": str(e)}), 503
+
+
+@app.errorhandler(requests.exceptions.HTTPError)
+def handle_requests_http_error(e):
+    # spotify_service calls a couple of endpoints with plain `requests` rather
+    # than through spotipy, so their failures aren't SpotifyExceptions and used
+    # to fall through to Flask's HTML 500 page - which the client then tried to
+    # parse as JSON, turning a clear API error into "Unexpected token '<'".
+    status = e.response.status_code if e.response is not None else 502
+    return jsonify({"error": f"Spotify returned {status}."}), status
 
 
 @app.errorhandler(SpotifyException)
@@ -51,6 +93,11 @@ def api_calendar(year, month):
 @app.route("/api/calendar/week/<int:year>/<int:month>/<int:day>")
 def api_calendar_week(year, month, day):
     return jsonify(calendar_service.get_week_grid(year, month, day))
+
+
+@app.route("/api/calendar/day/<int:year>/<int:month>/<int:day>")
+def api_calendar_day(year, month, day):
+    return jsonify(calendar_service.get_day_grid(year, month, day))
 
 
 @app.route("/api/calendar/agenda")
@@ -114,11 +161,11 @@ def accounts_page():
 
 @app.route("/api/calendar/accounts")
 def api_calendar_accounts():
-    labels = preferences.load_labels()
+    labels = demo_data.labels() if DEMO_MODE else preferences.load_labels()
     return jsonify(
         [
             {"email": email, "label": labels.get(email, email)}
-            for email in google_auth.signed_in_accounts()
+            for email in calendar_service.signed_in_accounts()
         ]
     )
 
@@ -379,5 +426,78 @@ def browser_page():
     return render_template("browser.html")
 
 
+@app.route("/today")
+def today_page():
+    return render_template("today.html")
+
+
+@app.route("/recipes")
+def recipes_page():
+    return render_template("recipes.html")
+
+
+@app.route("/notes")
+def notes_page():
+    return render_template("notes.html")
+
+
+@app.route("/api/recipes")
+def api_recipes():
+    return jsonify(recipes_service.get_recipes())
+
+
+@app.route("/api/notes")
+def api_notes():
+    return jsonify(tasks_service.get_notes())
+
+
+@app.route("/api/notes/add", methods=["POST"])
+def api_notes_add():
+    data = request.json or {}
+    return jsonify(tasks_service.add_note(data.get("title", ""), data.get("notes")))
+
+
+@app.route("/api/notes/<task_id>/done", methods=["POST"])
+def api_notes_done(task_id):
+    return jsonify(tasks_service.set_done(task_id, bool((request.json or {}).get("done"))))
+
+
+@app.route("/api/notes/<task_id>/delete", methods=["POST"])
+def api_notes_delete(task_id):
+    tasks_service.delete_note(task_id)
+    return jsonify({"ok": True})
+
+
+@app.errorhandler(tasks_service.TasksNotAuthorized)
+def handle_tasks_not_authorized(e):
+    return jsonify({"error": str(e), "needs_reauth": True}), 403
+
+
+@app.errorhandler(tasks_service.TasksUnavailable)
+def handle_tasks_unavailable(e):
+    return jsonify({"error": str(e)}), 503
+
+
+@app.route("/api/weather")
+def api_weather():
+    # get_weather() never raises - weather is decoration and must not be able to
+    # take a page down - so there's no error handling to do here.
+    return jsonify(weather_service.get_weather())
+
+
+@app.route("/api/browser/probe")
+def api_browser_probe():
+    try:
+        return jsonify(browser_service.probe(request.args.get("url", "")))
+    except browser_service.UnsafeUrl as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # 5000 is the real port everywhere - the kiosk launcher and the Google OAuth
+    # redirect URI are both pinned to it. PORT exists so a second instance can be
+    # brought up alongside it (the layout tests run a zero-accounts one); anything
+    # needing sign-in on another port must also override GOOGLE_OAUTH_REDIRECT_URI.
+    import os
+
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")), debug=True)
