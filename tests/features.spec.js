@@ -766,6 +766,28 @@ test.describe("weather page", () => {
     const sun = page.locator("#wx-sun");
     await expect(sun).toContainText(/\d+h \d\dm/);
     await expect(sun).toContainText(/longer tomorrow|shorter tomorrow|About the same/);
+    // A two-minute change must read "2m", not "0h 02m".
+    expect(await sun.textContent()).not.toMatch(/0h \d\dm/);
+  });
+
+  /* Open-Meteo returns raw totals, so the day list printed 0.004" and 0.035" -
+     four significant figures of drizzle, which reads as precision the forecast
+     doesn't have and is not a number anyone acts on. */
+  test("rain totals are rounded, and trace amounts omitted", async ({ page }) => {
+    await page.goto("/weather");
+    const totals = await page.locator("#wx-days").textContent();
+    expect(totals, "un-rounded rain total on screen").not.toMatch(/\d\.\d{3,}"/);
+
+    await page.route("**/api/weather", async (route) => {
+      const resp = await route.fetch();
+      const data = await resp.json();
+      const days = data.days.map((d, i) => ({ ...d, precip_total: i === 0 ? 0.004 : 0.2718 }));
+      await route.fulfill({ json: { ...data, days } });
+    });
+    await page.goto("/weather");
+    const rows = page.locator(".wx-day");
+    await expect(rows.first()).not.toContainText('"');      // trace: nothing shown
+    await expect(rows.nth(1)).toContainText('0.27"');       // rounded, not 0.2718
   });
 
   /* Caught on the live wall: "No thunder in the next 24 hours" sat directly above

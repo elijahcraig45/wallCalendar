@@ -176,6 +176,15 @@ function wxRenderHourly(hours) {
 
 /* ---------- the week ---------- */
 
+/** Rain totals at two decimals, and nothing at all below a twentieth of an inch.
+ *  Open-Meteo returns the raw figure, so the list was printing 0.004" and 0.035" -
+ *  four significant figures of drizzle, which reads as precision the forecast
+ *  doesn't have and is not a number anyone acts on. */
+function wxRainTotal(inches) {
+  if (inches == null || inches < 0.05) return "";
+  return `<span class="wx-sub"> ${inches.toFixed(2)}"</span>`;
+}
+
 function wxRenderDays(days) {
   if (days.length === 0) {
     wxDays.innerHTML = "";
@@ -203,7 +212,7 @@ function wxRenderDays(days) {
         }</div>
         <div class="wx-day-icon">${weatherIcon(day.icon)}</div>
         <div class="wx-day-precip">${day.precip_chance ? `${day.precip_chance}%` : ""}${
-          day.precip_total ? `<span class="wx-sub"> ${day.precip_total}"</span>` : ""
+          wxRainTotal(day.precip_total)
         }</div>
         <div class="wx-day-low">${day.low}°</div>
         <div class="wx-day-track">
@@ -308,7 +317,11 @@ async function wxLoadAlerts() {
 
 function wxDuration(minutes) {
   if (minutes == null) return "";
-  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+  const whole = Math.round(minutes);
+  // Minutes only under an hour: the daily change is a couple of minutes and
+  // "0h 02m shorter tomorrow" is a silly way to say "2m".
+  if (whole < 60) return `${whole}m`;
+  return `${Math.floor(whole / 60)}h ${String(whole % 60).padStart(2, "0")}m`;
 }
 
 function wxRenderSun(data) {
