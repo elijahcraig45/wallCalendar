@@ -17,6 +17,23 @@ if [ "$LOCAL" = "$REMOTE" ]; then
 fi
 
 echo "New commits found ($LOCAL -> $REMOTE) - pulling and rebuilding."
+
+# A dirty working tree makes `git pull --ff-only` abort, and this runs unattended
+# every 10 minutes - so without this the wall silently stops updating forever
+# after anyone edits a file on the Pi to debug something (which is exactly what
+# happens on an appliance you can SSH into). Stash rather than hard-reset: the
+# edit is preserved and recoverable with `git stash list`, and updates resume.
+if ! git diff --quiet || ! git diff --cached --quiet; then
+  STAMP="autorebuild-$(date +%Y%m%d-%H%M%S)"
+  echo "Working tree is dirty; stashing local changes as '$STAMP' so the update can proceed."
+  git stash push --include-untracked -m "$STAMP" || {
+    echo "Could not stash local changes - refusing to touch them. Fix by hand:" >&2
+    git status --short >&2
+    exit 1
+  }
+  echo "Recover them later with: git stash list / git stash show -p stash@{0}"
+fi
+
 git pull --ff-only origin main
 
 source .venv/bin/activate
