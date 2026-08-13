@@ -1,24 +1,30 @@
 """Air quality and pollen.
 
-Two sources, because no single keyless one covers both:
+Air quality is Open-Meteo's air-quality API: same provider as the forecast, no key,
+and `us_aqi` is populated for US locations.
 
-  - Air quality is Open-Meteo's air-quality API. Same provider as the forecast, no
-    key, and `us_aqi` is populated for US locations.
-  - Pollen is pollen.com (IQVIA). Open-Meteo *accepts* pollen variables and
-    returns all nulls here - they come from CAMS Europe, so US locations get
-    nothing. Verified against this wall's coordinates before looking elsewhere,
-    which is the same trap `lightning_potential` set in alerts_service.
+Pollen has two providers, in this order:
 
-About the pollen source, plainly: it is an undocumented endpoint. It requires a
-Referer header (405 without one), which means it is meant for their own site
-rather than for clients like this. It has been stable for years and it is the only
-keyless US option, but it may break without notice - so it is best-effort, it is
-labelled with its source on screen, and it degrades to absent rather than taking
-the panel down. The alternatives (Google Pollen, Ambee, AccuWeather) all want an
-API key, and a credential that expires is a worse property for an appliance meant
-to run untouched for months.
+  1. Google's Pollen API, when WALLCAL_POLLEN_KEY is set. Documented and
+     supported, and it says considerably more than the alternative: separate
+     grass/tree/weed indices, which specific plants are actually in season, and a
+     health note. Scale is the Universal Pollen Index, 0-5.
+  2. pollen.com (IQVIA) otherwise, and as a fallback if Google fails - so a quota
+     or billing problem degrades to the keyless source rather than to nothing.
+     Scale is 0-12. This one is an UNDOCUMENTED endpoint: it answers 405 without a
+     Referer header, meaning it's intended for their own site. Stable for years and
+     the only keyless US option, but it may vanish without notice.
 
-Both fetches are independent: pollen failing must not cost you the AQI, and vice
+The two scales are never mixed. Each answer carries its own `scale_max` and its own
+source name, and both are shown on screen, so a reading is always displayed against
+the scale it was actually measured on.
+
+Not Open-Meteo, for pollen: it *accepts* pollen variables and returns all nulls
+here - they come from CAMS Europe, so US locations get nothing. Verified against
+this wall's own coordinates before looking elsewhere, which is the same trap
+`lightning_potential` set in alerts_service.
+
+Every fetch here is independent: pollen failing must not cost you the AQI, and vice
 versa.
 """
 
@@ -28,10 +34,18 @@ import time
 
 import requests
 
-from app.config import DEMO_MODE, PROJECT_ROOT, WEATHER_LAT, WEATHER_LON, WEATHER_ZIP
+from app.config import (
+    DEMO_MODE,
+    POLLEN_API_KEY,
+    PROJECT_ROOT,
+    WEATHER_LAT,
+    WEATHER_LON,
+    WEATHER_ZIP,
+)
 
 AQI_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
 POLLEN_URL = "https://www.pollen.com/api/forecast/current/pollen"
+GOOGLE_POLLEN_URL = "https://pollen.googleapis.com/v1/forecast:lookup"
 
 USER_AGENT = "wallCalendar (https://github.com/elijahcraig45/wallCalendar)"
 
@@ -185,6 +199,125 @@ def _fetch_pollen() -> dict:
     return _parse_pollen(response.json())
 
 
+# ---------------------------------------------------------------------------
+# Google Pollen
+# ---------------------------------------------------------------------------
+#
+# Preferred when a key is configured. It is a documented, supported API rather
+# than a scraped endpoint, and it says considerably more: separate grass/tree/weed
+# indices, which specific plants are actually in season, and a health note.
+#
+# Its scale is the Universal Pollen Index, 0-5, NOT pollen.com's 0-12. The two are
+# never mixed - each answer carries its own `scale_max` and its own source name, so
+# a reading is always displayed against the scale it was measured on.
+
+# UPI category names come from Google rather than being derived here: it's their
+# index, and their bands. This is only the fallback for a response that omits it.
+_UPI_FALLBACK = ["None", "Very low", "Low", "Moderate", "High", "Very high"]
+
+
+def _upi_label(info: dict) -> str | None:
+    category = (info or {}).get("category")
+    if category:
+        return category
+    value = (info or {}).get("value")
+    if value is None:
+        return None
+    return _UPI_FALLBACK[min(int(value), len(_UPI_FALLBACK) - 1)]
+
+
+def _parse_google_day(day: dict) -> dict:
+    """One day of Google's forecast, in the same shape the pollen.com parser
+    produces, so the UI never has to know which provider answered."""
+    types = []
+    best = None
+    recommendation = None
+
+    for entry in day.get("pollenTypeInfo") or []:
+        info = entry.get("indexInfo") or {}
+        value = info.get("value")
+        types.append(
+            {
+                "name": entry.get("displayName") or entry.get("code"),
+                "index": value,
+                "label": _upi_label(info),
+                "in_season": entry.get("inSeason"),
+            }
+        )
+        if value is not None and (best is None or value > best):
+            best = value
+            notes = entry.get("healthRecommendations") or []
+            recommendation = notes[0] if notes else None
+
+    # The plants actually driving it, which is the part pollen.com can't do: it
+    # lists the same three triggers every day regardless of season.
+    triggers = [
+        plant.get("displayName") or plant.get("code")
+        for plant in day.get("plantInfo") or []
+        if plant.get("inSeason") and ((plant.get("indexInfo") or {}).get("value") or 0) > 0
+    ]
+
+    return {
+        "index": best,
+        "label": _upi_label({"value": best}) if best is not None else None,
+        "triggers": [t for t in triggers if t],
+        "types": types,
+        "recommendation": recommendation,
+    }
+
+
+def _parse_google_pollen(payload: dict) -> dict:
+    days = payload.get("dailyInfo") or []
+    today = _parse_google_day(days[0]) if days else {"index": None}
+    tomorrow = _parse_google_day(days[1]) if len(days) > 1 else {"index": None}
+
+    # Google's own category for the day's peak, when it gave us one, rather than
+    # the label derived from the bare number.
+    if days:
+        peak = max(
+            (
+                (e.get("indexInfo") or {})
+                for e in days[0].get("pollenTypeInfo") or []
+                if (e.get("indexInfo") or {}).get("value") is not None
+            ),
+            key=lambda i: i.get("value", -1),
+            default={},
+        )
+        if peak.get("category"):
+            today["label"] = peak["category"]
+
+    return {
+        "available": today.get("index") is not None,
+        "place": None,          # Google answers for coordinates, not a named place
+        "today": today,
+        "tomorrow": tomorrow,
+        # Google's forecast starts today; there is no yesterday to report.
+        "yesterday": {"index": None, "label": None, "triggers": []},
+        "source": "Google Pollen",
+        "scale_max": 5,
+    }
+
+
+def _fetch_google_pollen() -> dict:
+    response = requests.get(
+        GOOGLE_POLLEN_URL,
+        params={
+            "location.latitude": WEATHER_LAT,
+            "location.longitude": WEATHER_LON,
+            "days": 2,
+            # Plant pictures and long descriptions are a lot of payload for a
+            # wall that shows names only.
+            "plantsDescription": "false",
+        },
+        # The key goes in a header, never the query string: requests puts the URL
+        # into exception messages, so one logged traceback would print a `?key=`.
+        headers={"User-Agent": USER_AGENT, "X-Goog-Api-Key": POLLEN_API_KEY},
+        timeout=TIMEOUT_SECONDS,
+    )
+    response.raise_for_status()
+    return _parse_google_pollen(response.json())
+
+
 def get_air() -> dict:
     """Never raises, and the two halves fail independently: pollen breaking must
     not cost you the AQI. The pollen endpoint is undocumented and will eventually
@@ -210,11 +343,23 @@ def get_air() -> dict:
         aqi = {"available": False}
         errors.append(f"Couldn't reach the air quality service ({type(exc).__name__}).")
 
-    try:
-        pollen = _fetch_pollen()
-    except Exception as exc:  # noqa: BLE001 - see docstring
-        pollen = {"available": False, "source": "pollen.com"}
-        errors.append(f"Couldn't reach the pollen service ({type(exc).__name__}).")
+    # Google when a key is configured, pollen.com otherwise - and pollen.com as a
+    # fallback if Google fails, so a quota or billing problem degrades to the
+    # keyless source rather than to nothing. Note the messages carry only the
+    # exception CLASS: a Google error's str() can contain the request URL.
+    pollen = {"available": False, "source": "pollen.com"}
+    if POLLEN_API_KEY:
+        try:
+            pollen = _fetch_google_pollen()
+        except Exception as exc:  # noqa: BLE001 - see docstring
+            errors.append(f"Couldn't reach Google Pollen ({type(exc).__name__}).")
+
+    if not pollen.get("available"):
+        try:
+            pollen = _fetch_pollen()
+        except Exception as exc:  # noqa: BLE001 - see docstring
+            pollen.setdefault("source", "pollen.com")
+            errors.append(f"Couldn't reach the pollen service ({type(exc).__name__}).")
 
     result = {"aqi": aqi, "pollen": pollen, "errors": errors, "stale": False}
 

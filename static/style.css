@@ -3055,6 +3055,17 @@ textarea.text-input {
   opacity: 0.55;
 }
 
+/* Google's health note for the day's dominant pollen. Only present when Google
+   answered - pollen.com has no equivalent. */
+.wx-air-advice {
+  font-size: 0.78rem;
+  color: var(--text);
+  background: var(--tint);
+  border-radius: 8px;
+  padding: 8px 10px;
+  line-height: 1.35;
+}
+
 /* `!important`, and it's the right call for exactly this rule.
 
    .hidden is the one utility the whole app toggles from JavaScript, and source

@@ -375,13 +375,21 @@ const WX_AQI_COLORS = [
   { limit: Infinity, color: "#7e0023" },
 ];
 
+/* Pollen arrives on one of two scales - Google's Universal Pollen Index is 0-5,
+   pollen.com's is 0-12 - so the colour has to be chosen against whichever scale
+   answered. Colouring a 4 as "low" because the other provider's 4 is low would be
+   actively misleading: on Google's scale 4 is High. Normalise to a fraction of the
+   scale's own maximum and band that. */
 const WX_POLLEN_COLORS = [
-  { limit: 2.4, color: "#3ea72d" },
-  { limit: 4.8, color: "#9bbf30" },
-  { limit: 7.2, color: "#c8a415" },
-  { limit: 9.6, color: "#d8762a" },
+  { limit: 0.2, color: "#3ea72d" },
+  { limit: 0.4, color: "#9bbf30" },
+  { limit: 0.6, color: "#c8a415" },
+  { limit: 0.8, color: "#d8762a" },
   { limit: Infinity, color: "#c0272d" },
 ];
+
+const wxPollenColor = (index, scaleMax) =>
+  wxColorFor(WX_POLLEN_COLORS, (index || 0) / (scaleMax || 12));
 
 const wxColorFor = (scale, value) =>
   (scale.find((b) => value <= b.limit) || scale[scale.length - 1]).color;
@@ -445,7 +453,7 @@ function wxRenderAir(payload) {
   const tomorrow = pollen.tomorrow || {};
   const pollenBlock = pollen.available
     ? `<div class="wx-air-row">
-         <div class="wx-air-dial" style="--wx-dial:${wxColorFor(WX_POLLEN_COLORS, today.index)};--wx-dial-fg:${wxTextOn(wxColorFor(WX_POLLEN_COLORS, today.index))}">
+         <div class="wx-air-dial" style="--wx-dial:${wxPollenColor(today.index, pollen.scale_max)};--wx-dial-fg:${wxTextOn(wxPollenColor(today.index, pollen.scale_max))}">
            <span class="wx-air-value">${today.index}</span>
            <span class="wx-air-scale">/${pollen.scale_max}</span>
          </div>
@@ -454,6 +462,16 @@ function wxRenderAir(payload) {
            <div class="wx-air-note">${
              today.triggers && today.triggers.length
                ? wxEscape(today.triggers.join(", "))
+               : "Nothing in season"
+           }</div>
+           <div class="wx-air-parts">${
+             // Grass/tree/weed separately, which only Google supplies. Types with
+             // no reading at all are dropped rather than shown as a dash.
+             (today.types || []).filter((t) => t.index != null).length
+               ? (today.types || [])
+                   .filter((t) => t.index != null)
+                   .map((t) => `${wxEscape(t.name)} ${t.index}`)
+                   .join(" · ")
                : ""
            }</div>
            <div class="wx-air-parts">${
@@ -462,7 +480,12 @@ function wxRenderAir(payload) {
                : ""
            }</div>
          </div>
-       </div>`
+       </div>
+       ${
+         today.recommendation
+           ? `<div class="wx-air-advice">${wxEscape(today.recommendation)}</div>`
+           : ""
+       }`
     : `<p class="wx-empty">Pollen unavailable.</p>`;
 
   wxAir.innerHTML = `<h3>Air</h3>
@@ -471,7 +494,11 @@ function wxRenderAir(payload) {
       ${pollenBlock}
       <div class="wx-air-source">Air quality: Open-Meteo · Pollen: ${wxEscape(
         pollen.source || "pollen.com"
-      )}${payload.stale ? " · showing the last reading" : ""}</div>
+      )}${
+        // The scale is part of the attribution: 4 means different things on the
+        // two providers' indices, so the reader has to know which one this is.
+        pollen.available ? ` (0–${pollen.scale_max})` : ""
+      }${payload.stale ? " · showing the last reading" : ""}</div>
     </div>`;
 }
 

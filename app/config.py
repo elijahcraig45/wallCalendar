@@ -65,6 +65,17 @@ WEATHER_LABEL = os.environ.get("WALLCAL_PLACE", "Atlanta")
 # lat/lon-to-ZIP lookup worth adding a dependency for. One config value instead.
 WEATHER_ZIP = os.environ.get("WALLCAL_ZIP", "30303")
 
+# Google's Pollen API, if you have a key for it. Optional on purpose: without one,
+# pollen falls back to pollen.com, which needs no credential. Enable "Pollen API"
+# in the GCP project, create an API key, restrict it to that one API, and put it in
+# .env as WALLCAL_POLLEN_KEY.
+#
+# Passed to Google as an X-Goog-Api-Key HEADER rather than a ?key= query
+# parameter. Google accepts both, and the query form ends up inside request URLs -
+# which requests puts into exception messages, so a single logged traceback would
+# print the key. A header can't leak that way.
+POLLEN_API_KEY = os.environ.get("WALLCAL_POLLEN_KEY") or None
+
 # Daisy's Kitchen (github.com/elijahcraig45/daisys-kitchen). Its Firestore rules
 # make the recipes collection publicly readable, so this project id is the only
 # configuration needed - no API key, no service account, nothing secret.

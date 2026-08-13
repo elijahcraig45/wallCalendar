@@ -24,9 +24,61 @@ a now-playing chip.
 
 ### Weather
 
-Open-Meteo — no API key, no account, nothing to expire. Set `WALLCAL_LAT`,
-`WALLCAL_LON` and `WALLCAL_PLACE` in `.env`; it defaults to Atlanta. It also
-supplies the real sunrise/sunset that night dimming keys off.
+Conditions, hourly, and ten days come from **Open-Meteo** — no API key, no account,
+nothing to expire. Set `WALLCAL_LAT`, `WALLCAL_LON` and `WALLCAL_PLACE` in `.env`;
+it defaults to Atlanta. It also supplies the real sunrise/sunset that night dimming
+keys off.
+
+The `/weather` page adds three more sources, each degrading independently so one
+outage never blanks the page:
+
+| Data | Source | Key needed | Cadence |
+|---|---|---|---|
+| Conditions, hourly, 10 days | Open-Meteo | no | 15 min |
+| Severe alerts | NWS `api.weather.gov` | no | 3 min |
+| Radar loop | NWS RIDGE (animated GIF) | no | 4 min |
+| Air quality (US AQI) | Open-Meteo air-quality | no | 30 min |
+| Pollen | Google Pollen, else pollen.com | optional | 30 min |
+
+**On lightning:** there is no free public feed of individual strikes, so the page
+does not pretend to be a detector. Open-Meteo accepts a `lightning_potential`
+variable and returns all nulls for US locations — it's a European-model field.
+Thunderstorms are covered by NWS severe-thunderstorm/tornado warnings, CAPE as an
+instability measure, and the radar loop.
+
+#### Pollen
+
+Two providers. **Google's Pollen API** is used when `WALLCAL_POLLEN_KEY` is set: it
+is documented and supported, and it gives separate grass/tree/weed indices, the
+specific plants in season, and a health note. Without a key — or if Google fails —
+it falls back to **pollen.com**, which needs no credential but is an *undocumented*
+endpoint (it answers 405 without a `Referer`) and may vanish without notice.
+
+The two use different scales: Google's Universal Pollen Index is **0–5**, pollen.com's
+is **0–12**. They are never mixed — each reading carries its own scale, the dial is
+coloured against that scale, and the range is printed next to the source. A "4"
+means High on one and Low-medium on the other.
+
+To set up the Google key:
+
+1. In the GCP project, enable **Pollen API**.
+2. Create an API key and **restrict it to the Pollen API only** (Credentials →
+   the key → API restrictions). It is otherwise usable against every enabled API
+   in the project.
+3. Add it to `.env` — which is gitignored — as `WALLCAL_POLLEN_KEY=...`, then
+   restart: `sudo systemctl restart wallcalendar`.
+4. Check it took, without printing the key:
+   `curl -s localhost:5000/api/weather/air | python3 -m json.tool | grep source`
+
+The key is sent to Google as an `X-Goog-Api-Key` **header**, never as a `?key=`
+query parameter: `requests` includes the request URL in its exception messages, so
+in query form a single logged traceback would print the credential. Error messages
+here deliberately carry only the exception class for the same reason, and
+`tests/api_checks.py` enforces both.
+
+Pollen is billed under Google Maps Platform rather than being free. At one request
+per 30 minutes this is roughly 1,500 calls a month; check the current free tier and
+set a budget alert rather than taking that as a promise.
 
 ### Notes — removed for now
 

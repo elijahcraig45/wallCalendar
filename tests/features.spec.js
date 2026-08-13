@@ -681,6 +681,82 @@ test.describe("weather page", () => {
     expect(await page.locator(".wx-air-dial").count()).toBe(2);
   });
 
+  /* Two providers, two scales: Google's UPI is 0-5, pollen.com's is 0-12. A bare
+     "4" is High on one and Low-medium on the other, so the dial's colour has to be
+     chosen against whichever scale answered - and the scale has to be on screen.
+     Colouring a Google 4 green because 4/12 is low would be actively misleading. */
+  test("pollen is coloured and labelled against its own scale", async ({ page }) => {
+    const withPollen = (pollen) => async (route) => {
+      const resp = await route.fetch();
+      const data = await resp.json();
+      await route.fulfill({ json: { ...data, pollen } });
+    };
+
+    const dialColor = () =>
+      page.locator(".wx-air-row").nth(1).locator(".wx-air-dial")
+        .evaluate((el) => getComputedStyle(el).backgroundColor);
+
+    // Google: 4 out of 5 is High, and must read as such.
+    await page.route("**/api/weather/air", withPollen({
+      available: true, source: "Google Pollen", scale_max: 5,
+      today: { index: 4, label: "High", triggers: ["Ragweed"], types: [], recommendation: null },
+      tomorrow: { index: 2, label: "Low" }, yesterday: { index: null },
+    }));
+    await page.goto("/weather");
+    await expect(page.locator("#wx-air")).toContainText("Pollen · High");
+    await expect(page.locator("#wx-air")).toContainText("Google Pollen");
+    await expect(page.locator("#wx-air")).toContainText("0–5");
+    const googleFour = await dialColor();
+
+    // pollen.com: 4 out of 12 is Low-medium, and must NOT be the same colour.
+    await page.unroute("**/api/weather/air");
+    await page.route("**/api/weather/air", withPollen({
+      available: true, source: "pollen.com", scale_max: 12,
+      today: { index: 4, label: "Low-medium", triggers: ["Grasses"] },
+      tomorrow: { index: 3, label: "Low-medium" }, yesterday: { index: 5 },
+    }));
+    await page.goto("/weather");
+    await expect(page.locator("#wx-air")).toContainText("Pollen · Low-medium");
+    await expect(page.locator("#wx-air")).toContainText("0–12");
+    const iqviaFour = await dialColor();
+
+    expect(iqviaFour, "the same number is coloured identically on both scales")
+      .not.toBe(googleFour);
+  });
+
+  /* Google supplies things pollen.com can't: per-type indices and a health note. */
+  test("Google's extra pollen detail is shown when it answers", async ({ page }) => {
+    await page.route("**/api/weather/air", async (route) => {
+      const resp = await route.fetch();
+      const data = await resp.json();
+      await route.fulfill({
+        json: {
+          ...data,
+          pollen: {
+            available: true, source: "Google Pollen", scale_max: 5,
+            today: {
+              index: 4, label: "High", triggers: ["Ragweed", "Oak"],
+              types: [
+                { name: "Grass", index: 4, label: "High", in_season: true },
+                { name: "Tree", index: 1, label: "Very Low", in_season: false },
+                // No reading: must be dropped, not shown as a dash or a zero.
+                { name: "Weed", index: null, label: null, in_season: false },
+              ],
+              recommendation: "Keep windows closed in the morning.",
+            },
+            tomorrow: { index: 2, label: "Low" }, yesterday: { index: null },
+          },
+        },
+      });
+    });
+    await page.goto("/weather");
+    const air = page.locator("#wx-air");
+    await expect(air).toContainText("Grass 4");
+    await expect(air).toContainText("Tree 1");
+    await expect(air).not.toContainText("Weed");
+    await expect(page.locator(".wx-air-advice")).toContainText("windows closed");
+  });
+
   /* Pollen comes from an undocumented endpoint that will break one day. When it
      does, the air quality half has to survive it. */
   test("pollen failing leaves the air quality showing", async ({ page }) => {

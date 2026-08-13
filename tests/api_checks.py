@@ -378,6 +378,212 @@ def check_radar_regions_are_verified():
           f"duplicates: {[x for x in set(seen) if seen.count(x) > 1]}")
 
 
+
+def check_google_pollen_parsing():
+    """Google's Pollen API, against the documented response shape.
+
+    Unverified against the live API at the time of writing - there was no key yet -
+    so this pins the parser to the schema Google documents, and the fixture is
+    shaped exactly like a real response including the parts that are optional.
+
+    The important property is that the two providers' scales never mix: Google's
+    UPI is 0-5 and pollen.com's is 0-12, so a bare "4" means "High" from one and
+    "Low-medium" from the other. Every answer therefore carries its own scale_max
+    and source.
+    """
+    print("google pollen parsing")
+    from app import air_service
+
+    payload = {
+        "regionCode": "US",
+        "dailyInfo": [
+            {
+                "date": {"year": 2026, "month": 8, "day": 13},
+                "pollenTypeInfo": [
+                    {
+                        "code": "GRASS",
+                        "displayName": "Grass",
+                        "inSeason": True,
+                        "indexInfo": {
+                            "code": "UPI",
+                            "value": 4,
+                            "category": "High",
+                            "indexDescription": "...",
+                        },
+                        "healthRecommendations": [
+                            "Keep windows closed in the morning.",
+                            "Second recommendation.",
+                        ],
+                    },
+                    {
+                        "code": "TREE",
+                        "displayName": "Tree",
+                        "inSeason": False,
+                        "indexInfo": {"code": "UPI", "value": 1, "category": "Very Low"},
+                    },
+                    # A type with no reading at all, which Google does return
+                    # out of season - it must not become a 0 or a crash.
+                    {"code": "WEED", "displayName": "Weed", "inSeason": False},
+                ],
+                "plantInfo": [
+                    {
+                        "code": "RAGWEED",
+                        "displayName": "Ragweed",
+                        "inSeason": True,
+                        "indexInfo": {"value": 3, "category": "Moderate"},
+                    },
+                    # In season but reading zero: not a trigger today.
+                    {"code": "OAK", "displayName": "Oak", "inSeason": True,
+                     "indexInfo": {"value": 0}},
+                    # Out of season entirely.
+                    {"code": "BIRCH", "displayName": "Birch", "inSeason": False,
+                     "indexInfo": {"value": 2}},
+                ],
+            },
+            {
+                "date": {"year": 2026, "month": 8, "day": 14},
+                "pollenTypeInfo": [
+                    {"code": "GRASS", "displayName": "Grass", "inSeason": True,
+                     "indexInfo": {"value": 2, "category": "Low"}},
+                ],
+            },
+        ],
+    }
+
+    parsed = air_service._parse_google_pollen(payload)
+
+    check("google pollen reports available", parsed["available"] is True)
+    check("the scale is UPI 0-5, not 0-12", parsed["scale_max"] == 5,
+          f"got {parsed['scale_max']}")
+    check("the source names Google", parsed["source"] == "Google Pollen")
+    check("today takes the highest type's index", parsed["today"]["index"] == 4,
+          f"got {parsed['today']['index']}")
+    check("today uses Google's own category", parsed["today"]["label"] == "High",
+          f"got {parsed['today']['label']}")
+    check(
+        "the health note comes from the dominant type",
+        parsed["today"]["recommendation"] == "Keep windows closed in the morning.",
+        f"got {parsed['today']['recommendation']}",
+    )
+    check(
+        "only in-season plants with a reading are triggers",
+        parsed["today"]["triggers"] == ["Ragweed"],
+        f"got {parsed['today']['triggers']}",
+    )
+    check("tomorrow is parsed too", parsed["tomorrow"]["index"] == 2,
+          f"got {parsed['tomorrow']['index']}")
+    check("google has no yesterday to report", parsed["yesterday"]["index"] is None)
+
+    # A type with no indexInfo must be carried through as absent rather than zero:
+    # "Weed 0" and "no weed reading" are different statements.
+    weed = [t for t in parsed["today"]["types"] if t["name"] == "Weed"][0]
+    check("a type with no reading stays absent, not zero", weed["index"] is None,
+          f"got {weed['index']}")
+
+    # Degenerate responses: an empty forecast, and a day with nothing in it.
+    for name, bad in [("no dailyInfo", {}), ("an empty day", {"dailyInfo": [{}]})]:
+        result = air_service._parse_google_pollen(bad)
+        check(f"{name} reports unavailable rather than raising",
+              result["available"] is False)
+
+
+def check_pollen_key_never_rides_in_a_url():
+    """The API key goes in an X-Goog-Api-Key header, not a ?key= query parameter.
+
+    requests puts the request URL into its exception messages, so with the key in
+    the query string a single logged traceback would print the credential. This
+    also checks the error paths report only the exception CLASS for the same
+    reason - a Google error's str() can carry the URL.
+    """
+    print("pollen key handling")
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent / "app" / "air_service.py"
+    ).read_text()
+
+    # Comments are stripped before scanning: the first version of this check failed
+    # on the comment explaining why the key ISN'T a query parameter, which contains
+    # the literal "?key=". Scanning prose for code smells finds prose.
+    code = "\n".join(
+        line.split("#", 1)[0] for line in source.splitlines()
+    )
+    google_call = code[code.index("def _fetch_google_pollen"):]
+    check(
+        "the key is sent as a header",
+        "X-Goog-Api-Key" in google_call,
+    )
+    check(
+        "the key is never a query parameter",
+        '"key"' not in google_call and "?key=" not in google_call,
+    )
+    check(
+        "error messages carry only the exception class, never str(exc)",
+        "type(exc).__name__" in code and "{exc}" not in code,
+    )
+    # And the key must never reach the browser.
+    # The key may only appear where it is read from config and where it is sent.
+    uses = [
+        line.strip() for line in code.splitlines() if "POLLEN_API_KEY" in line
+    ]
+    check(
+        "the key is referenced only to import it, test it, and send it",
+        len(uses) == 3,
+        f"unexpected uses: {uses}",
+    )
+
+
+
+def check_pollen_provider_fallback():
+    """Google when a key is set, pollen.com otherwise - and pollen.com if Google
+    fails, so a wrong key, an unenabled API or a billing lapse degrades to the
+    keyless source rather than to an empty panel."""
+    print("pollen provider fallback")
+    from app import air_service
+
+    google = {"available": True, "source": "Google Pollen", "scale_max": 5,
+              "today": {"index": 4}, "tomorrow": {}, "yesterday": {}}
+    iqvia = {"available": True, "source": "pollen.com", "scale_max": 12,
+             "today": {"index": 7.2}, "tomorrow": {}, "yesterday": {}}
+    aqi = {"available": True, "aqi": 52, "label": "Moderate"}
+
+    def run(key, google_result):
+        # Reset the module cache so each case actually fetches.
+        air_service._cache = None
+        air_service._last_good = None
+        with patch.object(air_service, "POLLEN_API_KEY", key), \
+             patch.object(air_service, "_fetch_aqi", return_value=aqi), \
+             patch.object(air_service, "_fetch_pollen", return_value=iqvia), \
+             patch.object(air_service, "_load_persisted", return_value=None), \
+             patch.object(air_service, "_persist"), \
+             patch.object(air_service, "DEMO_MODE", False), \
+             patch.object(air_service, "_fetch_google_pollen", **google_result):
+            return air_service.get_air()
+
+    with_key = run("a-key", {"return_value": google})
+    check("with a key, Google answers", with_key["pollen"]["source"] == "Google Pollen",
+          f"got {with_key['pollen']['source']}")
+    check("Google's scale comes with it", with_key["pollen"]["scale_max"] == 5)
+    check("no errors on the happy path", with_key["errors"] == [], f"got {with_key['errors']}")
+
+    no_key = run(None, {"return_value": google})
+    check("without a key, pollen.com answers", no_key["pollen"]["source"] == "pollen.com",
+          f"got {no_key['pollen']['source']}")
+
+    # A 403 is what an unenabled API or a restricted key returns.
+    broken = run("a-key", {"side_effect": RuntimeError("403 Forbidden")})
+    check(
+        "a failing Google falls back to pollen.com",
+        broken["pollen"]["source"] == "pollen.com" and broken["pollen"]["available"],
+        f"got {broken['pollen']}",
+    )
+    check(
+        "and the failure is reported without leaking the exception text",
+        any("Google Pollen" in e for e in broken["errors"])
+        and not any("403" in e for e in broken["errors"]),
+        f"got {broken['errors']}",
+    )
+    check("the AQI is unaffected by any of this", broken["aqi"]["aqi"] == 52)
+
+
 def main():
     os.environ.setdefault("FLASK_SECRET_KEY", "api-checks")
     for fn in (
@@ -391,6 +597,9 @@ def main():
         check_weather_hourly_is_anchored_to_now,
         check_air_quality_and_pollen,
         check_radar_regions_are_verified,
+        check_google_pollen_parsing,
+        check_pollen_key_never_rides_in_a_url,
+        check_pollen_provider_fallback,
     ):
         fn()
 
