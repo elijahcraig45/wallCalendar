@@ -666,6 +666,62 @@ test.describe("weather page", () => {
     await expect(page.locator(".wx-thunder-cape")).toContainText("CAPE");
   });
 
+  /* Caught on the live wall: "No thunder in the next 24 hours" sat directly above
+     "Very unstable - strong storms possible" while the radar showed cells 30 miles
+     out. All three statements were true; leading with only the first is how a wall
+     display loses your trust. */
+  test("an unstable sky with no forecast thunder says so", async ({ page }) => {
+    await page.route("**/api/weather", async (route) => {
+      const resp = await route.fetch();
+      const data = await resp.json();
+      await route.fulfill({
+        json: { ...data, thunder_hours: [], cape_peak: 2570 },
+      });
+    });
+    await page.goto("/weather");
+    await expect(page.locator(".wx-thunder-head")).toContainText("the air is unstable");
+    await expect(page.locator(".wx-thunder-cape")).toContainText("Very unstable");
+
+    // And a genuinely quiet sky must not be dressed up as anything.
+    await page.unroute("**/api/weather");
+    await page.route("**/api/weather", async (route) => {
+      const resp = await route.fetch();
+      const data = await resp.json();
+      await route.fulfill({ json: { ...data, thunder_hours: [], cape_peak: 200 } });
+    });
+    await page.goto("/weather");
+    await expect(page.locator(".wx-thunder-head")).toHaveText("No thunder in the next 24 hours");
+  });
+
+  /* A regional advisory lists every county it covers - thirty-odd names, five
+     wrapped lines, burying the alerts under it. */
+  test("a long county list is truncated, with the full one in the detail", async ({ page }) => {
+    const counties = Array.from({ length: 30 }, (_, i) => `County${i}`).join("; ");
+    await page.route("**/api/weather/alerts", (route) =>
+      route.fulfill({
+        json: {
+          alerts: [
+            {
+              id: "x", event: "Heat Advisory", severity: "Moderate", urgent: false,
+              area: counties, headline: "Heat Advisory in effect",
+              description: "Hot.", instruction: null, sender: "NWS", ends: null, expires: null,
+            },
+          ],
+          count: 1, urgent_count: 0,
+        },
+      })
+    );
+    await page.goto("/weather");
+
+    const summary = page.locator(".wx-alert-area");
+    await expect(summary).toContainText("+ 26 more");
+    expect((await summary.textContent()).length).toBeLessThan(80);
+
+    // The full list is still available, just not in the collapsed row.
+    await page.locator('[data-wx-alert="0"]').click();
+    await expect(page.locator(".wx-alert-fullarea")).toContainText("County29");
+  });
+
   test("a failing alerts service leaves the rest of the page working", async ({ page }) => {
     // Alerts are NWS; every number is Open-Meteo. One source failing must not
     // take the other half of the page down, which is why they are separate calls.

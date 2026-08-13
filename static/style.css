@@ -2896,6 +2896,8 @@ textarea.text-input {
 
 #weather-more { display: inline-block; margin-top: 12px; text-decoration: none; }
 
+.wx-alert-fullarea { color: var(--text-dim); font-size: 0.78rem !important; }
+
 /* `!important`, and it's the right call for exactly this rule.
 
    .hidden is the one utility the whole app toggles from JavaScript, and source

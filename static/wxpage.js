@@ -106,14 +106,22 @@ function wxRenderThunder(data) {
   const band = WX_CAPE_BANDS.find((b) => (cape ?? 0) < b.limit);
   const first = thunderHours[0];
 
+  /* "No thunder in the next 24 hours" sat directly above "Very unstable - strong
+     storms possible", with live radar showing storms 30 miles away. All three were
+     true at once: the hourly codes had no thunder in them, the air was unstable,
+     and cells were firing. Saying only the first of those is how a wall display
+     loses your trust, so an unstable-but-not-forecast sky says so. */
+  const unstable = cape != null && cape >= 1000;
+  const headline = thunderHours.length
+    ? `Thunder in the forecast from ${wxHourLabel(first)}`
+    : unstable
+      ? "No thunder in the hourly forecast, but the air is unstable"
+      : "No thunder in the next 24 hours";
+
   wxThunder.innerHTML = `
     <h3>Storm outlook</h3>
-    <div class="wx-thunder-body${thunderHours.length ? " wx-thunder-body--active" : ""}">
-      <div class="wx-thunder-head">${
-        thunderHours.length
-          ? `Thunder in the forecast from ${wxEscape(wxHourLabel(first))}`
-          : "No thunder in the next 24 hours"
-      }</div>
+    <div class="wx-thunder-body${thunderHours.length || unstable ? " wx-thunder-body--active" : ""}">
+      <div class="wx-thunder-head">${wxEscape(headline)}</div>
       ${cape != null
         ? `<div class="wx-thunder-cape"><strong>${band.label}</strong> · CAPE ${cape} J/kg</div>
            <div class="wx-thunder-note">${wxEscape(band.note)}</div>`
@@ -141,7 +149,7 @@ function wxRenderHourly(hours) {
       (h) => `
       <div class="wx-hour">
         <div class="wx-hour-time">${wxEscape(wxHourLabel(h.time))}</div>
-        <div class="wx-hour-icon">${weatherIcon(h.icon)}</div>
+        <div class="wx-hour-icon">${weatherIconAt(h.icon, h.is_day)}</div>
         <div class="wx-hour-temp">${h.temperature}°</div>
         <div class="wx-hour-precip${h.precip_chance >= 40 ? " wx-hour-precip--likely" : ""}">${
           h.precip_chance != null ? `${h.precip_chance}%` : ""
@@ -188,6 +196,18 @@ function wxRenderDays(days) {
 
 /* ---------- alerts ---------- */
 
+/** NWS lists every zone an alert covers, which for a regional heat advisory is
+ *  thirty-odd county names - five wrapped lines that buried the two alerts under
+ *  them. The first few, then a count; the full list is in the expanded detail. */
+const WX_AREA_NAMES = 4;
+
+function wxShortArea(area) {
+  if (!area) return "";
+  const names = area.split(";").map((n) => n.trim()).filter(Boolean);
+  if (names.length <= WX_AREA_NAMES) return names.join(", ");
+  return `${names.slice(0, WX_AREA_NAMES).join(", ")} + ${names.length - WX_AREA_NAMES} more`;
+}
+
 function wxRenderAlerts(payload) {
   const alerts = (payload && payload.alerts) || [];
 
@@ -213,9 +233,10 @@ function wxRenderAlerts(payload) {
             alert.ends ? `until ${wxEscape(wxTime(alert.ends))}` : ""
           }</span>
         </button>
-        <div class="wx-alert-area">${wxEscape(alert.area || "")}</div>
+        <div class="wx-alert-area">${wxEscape(wxShortArea(alert.area))}</div>
         <div class="wx-alert-detail hidden" data-wx-detail="${index}">
           ${alert.headline ? `<p class="wx-alert-headline">${wxEscape(alert.headline)}</p>` : ""}
+          ${alert.area ? `<p class="wx-alert-fullarea">${wxEscape(alert.area)}</p>` : ""}
           ${alert.description ? `<p class="wx-alert-desc">${wxEscape(alert.description)}</p>` : ""}
           ${alert.instruction
             ? `<p class="wx-alert-instruction">${wxEscape(alert.instruction)}</p>`

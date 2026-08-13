@@ -19,8 +19,24 @@ const WEATHER_ICONS = {
   storm: '<svg viewBox="0 0 24 24"><path d="M7 14h10.5a3.5 3.5 0 0 0 .2-7 5.5 5.5 0 0 0-10.6 1A3.5 3.5 0 0 0 7 14z" fill="currentColor"/><path d="M13 16l-4 6h3l-1 4 5-6h-3l1.5-4z" fill="currentColor"/></svg>',
 };
 
+// Night variants. Only clear and partly need them - a rain cloud looks the same
+// at any hour, but a blazing sun at midnight makes the whole panel look wrong.
+const WEATHER_ICONS_NIGHT = {
+  clear: '<svg viewBox="0 0 24 24"><path d="M15.5 2A9.5 9.5 0 1 0 22 13.2 7.5 7.5 0 0 1 15.5 2z" fill="currentColor"/></svg>',
+  partly: '<svg viewBox="0 0 24 24"><path d="M11.5 2.6A6.4 6.4 0 1 0 16 10.2 5 5 0 0 1 11.5 2.6z" fill="currentColor"/><path d="M8 19h8.5a3.3 3.3 0 0 0 .2-6.6 5.2 5.2 0 0 0-10 .9A3.2 3.2 0 0 0 8 19z" fill="currentColor" opacity="0.85"/></svg>',
+};
+
 function weatherIcon(key) {
   return WEATHER_ICONS[key] || WEATHER_ICONS.cloudy;
+}
+
+/** The icon for a key at a given time of day. `isDay` undefined means day, so
+ *  callers with no daylight information behave exactly as before. */
+function weatherIconAt(key, isDay) {
+  if (isDay === false || isDay === 0) {
+    return WEATHER_ICONS_NIGHT[key] || weatherIcon(key);
+  }
+  return weatherIcon(key);
 }
 
 const weatherChip = document.getElementById("weather-chip");

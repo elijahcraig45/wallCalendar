@@ -49,7 +49,7 @@ def _payload() -> dict:
 
 def _hourly(dates: list[str]) -> dict:
     """Two days of hourly values, shaped exactly like Open-Meteo's."""
-    times, temps, probs, codes, feels, winds, capes = [], [], [], [], [], [], []
+    times, temps, probs, codes, feels, winds, capes, daylight = [], [], [], [], [], [], [], []
     for day_index, date in enumerate(dates[:2]):
         for hour in range(24):
             times.append(f"{date}T{hour:02d}:00")
@@ -65,6 +65,7 @@ def _hourly(dates: list[str]) -> dict:
             probs.append(80 if storm else (15 if hour > 12 else 5))
             winds.append(14 if storm else 5)
             capes.append(2600 if storm else (900 if hour > 11 else 300))
+            daylight.append(1 if 7 <= hour <= 20 else 0)
     return {
         "time": times,
         "temperature_2m": temps,
@@ -73,6 +74,7 @@ def _hourly(dates: list[str]) -> dict:
         "weather_code": codes,
         "wind_speed_10m": winds,
         "cape": capes,
+        "is_day": daylight,
     }
 
 

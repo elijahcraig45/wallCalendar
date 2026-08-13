@@ -123,6 +123,9 @@ def _parse(payload: dict) -> dict:
                 "precip_chance": hour("precipitation_probability"),
                 "wind": _round(hour("wind_speed_10m")),
                 "cape": _round(hour("cape")),
+                # Without this the strip drew a sun at midnight, which is a small
+                # thing that makes a wall display look untrustworthy.
+                "is_day": bool(hour("is_day", 1)),
                 **dict(zip(("label", "icon"), describe(hour("weather_code")))),
             }
         )
@@ -207,7 +210,7 @@ def _fetch_once() -> dict:
             # locations, so instability plus the WMO thunder codes is what there
             # is. Actual strike proximity needs a commercial feed.
             "hourly": "temperature_2m,precipitation_probability,weather_code,"
-                      "apparent_temperature,wind_speed_10m,cape",
+                      "apparent_temperature,wind_speed_10m,cape,is_day",
             "timezone": "auto",
             "forecast_days": 7,
             "temperature_unit": "fahrenheit",
