@@ -730,6 +730,13 @@ test.describe("weather page", () => {
     await expect(overlay).toBeVisible();
     await expect(page.locator("#wx-radar-caption")).toContainText("KFFC");
 
+    /* Opening it has to actually enlarge. The source GIF is 600x550 - the same
+       size as the thumbnail - so at native scale this overlay showed the identical
+       picture in a bigger box and the feature did nothing. */
+    const big = await page.locator("#wx-radar-big").boundingBox();
+    expect(big.width, "the enlarged radar is no bigger than the thumbnail")
+      .toBeGreaterThan(box.width * 1.3);
+
     await page.locator('[data-wx-radar="regional"]').click();
     await expect(page.locator("#wx-radar-caption")).toContainText("SOUTHEAST");
     await expect(page.locator("#wx-radar-big img")).toHaveAttribute("src", /SOUTHEAST_loop/);
