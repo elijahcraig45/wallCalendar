@@ -102,3 +102,19 @@ journalctl -u wallcalendar-autorebuild.service -n 20  # last rebuild check
   setup you don't want to lose. `librespot-setup.sh` pipes the upstream raspotify
   installer to `sh` (as upstream documents) and rewrites `/etc/raspotify/conf`,
   keeping a `.orig` copy — read it before running it.
+
+## If the wall stops updating
+
+`git-autorebuild.sh` stashes local modifications before pulling, so editing a file
+on the Pi no longer wedges updates permanently. Check what it set aside with:
+
+```bash
+cd ~/calendar/wallCalendar && git stash list
+git stash show -p 'stash@{0}'          # inspect
+git stash pop                          # or reapply
+```
+
+Note the chicken-and-egg this fix had to be dragged through: the guard lives in
+the repo it updates, so a Pi already wedged by a dirty tree cannot pull the fix
+that unwedges it. Clear it once by hand (`git checkout -- <file>`), after which it
+self-heals.
