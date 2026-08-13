@@ -320,6 +320,8 @@ function renderTimeGrid(days) {
       const pill = document.createElement("div");
       pill.className = "event-pill";
       pill.style.background = ev.color;
+      // Google's chips are light with dark text; white would be unreadable.
+      pill.style.color = ev.text_color || "#1d1d1d";
       pill.appendChild(pillTitle(ev.title));
       attachEventOpen(pill, ev);
       allDayCol.appendChild(pill);
@@ -375,6 +377,7 @@ function renderTimeGrid(days) {
       const block = document.createElement("div");
       block.className = "event-block";
       block.style.background = item.ev.color;
+      block.style.color = item.ev.text_color || "#1d1d1d";
       const top = Math.max(0, gridTop(item.startMin));
       const height = Math.max(gridTop(item.drawEndMin) - top, MIN_BLOCK_PX);
       block.style.top = `${top}px`;

@@ -257,15 +257,27 @@ test.describe("ambient and themes", () => {
 
     expect(later.accent, "accent did not change across seasons").not.toBe(first.accent);
 
-    // A theme now sets its own ground as well as its accent, so --bg is expected
-    // to move. What must never move is the text colour, and the ground must stay
-    // dark enough for that white text to work - which is the actual invariant the
-    // original assertion was reaching for.
-    expect(later.text).toBe(first.text);
-    for (const shade of [first.bg, later.bg]) {
-      const [r, g, b] = shade.replace("#", "").match(/../g).map((h) => parseInt(h, 16));
-      const luminance = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-      expect(luminance, `theme ground ${shade} is too light for white text`).toBeLessThan(0.25);
+    // A theme sets its own ground AND its text, so neither is fixed. The real
+    // invariant - the one both earlier versions of this assertion were groping
+    // for - is that body text stays readable against the surface it sits on,
+    // whichever direction the palette goes.
+    for (const shade of [first, later]) {
+      const contrast = await page.evaluate(() => {
+        const lum = (css) => {
+          const [r, g, b] = css.match(/\d+/g).map(Number).map((v) => {
+            const c = v / 255;
+            return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+          });
+          return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        };
+        const cell = document.querySelector(".day-cell:not(.today):not(.outside-month)");
+        const a = lum(getComputedStyle(cell).backgroundColor);
+        const b = lum(getComputedStyle(cell.querySelector(".day-number")).color);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      });
+      // 4.5:1 is the WCAG AA threshold for body text.
+      expect(contrast, `theme ${shade.accent} leaves text unreadable on its cells`)
+        .toBeGreaterThan(4.5);
     }
   });
 
@@ -288,7 +300,7 @@ test.describe("ambient and themes", () => {
         name: document.documentElement.dataset.theme,
         accent: cs.getPropertyValue("--accent").trim(),
         base: cs.getPropertyValue("--bg").trim(),
-        lines: cs.getPropertyValue("--grid-line").trim(),
+        lines: cs.getPropertyValue("--border").trim(),
         strength: cs.getPropertyValue("--theme-strength").trim(),
       };
     });
@@ -307,13 +319,15 @@ test.describe("ambient and themes", () => {
       const cs = getComputedStyle(document.documentElement);
       return {
         accent: cs.getPropertyValue("--accent").trim(),
-        secondary: cs.getPropertyValue("--accent2").trim(),
-        lines: cs.getPropertyValue("--grid-line").trim(),
+        text: cs.getPropertyValue("--text").trim(),
+        lines: cs.getPropertyValue("--border").trim(),
       };
     });
     expect(derived.accent).toBe("#3fa7d6");
-    expect(derived.secondary, "secondary was not derived from accent").toMatch(/^#[0-9a-f]{6}$/i);
     expect(derived.lines, "grid line colour was not derived").toMatch(/^#[0-9a-f]{6}$/i);
+    // A one-field theme still has to produce readable text, which means the
+    // resolver picked it from the ground's lightness rather than leaving it unset.
+    expect(derived.text, "text colour was not derived").toMatch(/^#[0-9a-f]{6}$/i);
   });
 
   test("night dimming can be turned on by the clock and woken by a touch", async ({ page }) => {
@@ -331,4 +345,94 @@ test.describe("ambient and themes", () => {
     await expect.poll(dimOpacity).toBe(0);
     await shoot(page, "feat-night-woken");
   });
+});
+
+test.describe("light-theme contrast sweep", () => {
+  test.use({ viewport: { width: 1920, height: 1080 } });
+
+  /* This app was built dark and converted to a light ground. That conversion
+     touches every surface, and the failure mode is silent: a rule that hardcoded
+     white text, or a faint white-over-dark overlay, still "works" - it just
+     becomes invisible. So rather than trusting the sweep of replacements, this
+     walks every visible text node on every page and measures the contrast it
+     actually renders at. */
+  for (const target of ["/", "/today", "/recipes", "/browser", "/accounts", "/spotify"]) {
+    test(`no unreadable text on ${target}`, async ({ page }) => {
+      await page.goto(target);
+      await page.waitForTimeout(1600);
+
+      const offenders = await page.evaluate(() => {
+        const channel = (v) => {
+          const c = v / 255;
+          return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        };
+        const parse = (css) => {
+          const m = (css || "").match(/[\d.]+/g);
+          if (!m) return null;
+          const [r, g, b, a] = m.map(Number);
+          return { r, g, b, a: a === undefined ? 1 : a };
+        };
+        const relLum = ({ r, g, b }) =>
+          0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+
+        /* Backgrounds have to be COMPOSITED, not just read. Nearly every faint
+           fill here is translucent (rgba(0,0,0,0.04) over white, today's cell is
+           the accent at 10%), and reading those as opaque colours reports pale
+           peach as near-black - which produced a page of confident false
+           positives the first time this ran. */
+        const effectiveBg = (el) => {
+          const layers = [];
+          for (let n = el; n; n = n.parentElement) {
+            const c = parse(getComputedStyle(n).backgroundColor);
+            if (!c || c.a === 0) continue;
+            layers.push(c);
+            if (c.a >= 1) break;
+          }
+          // Assume the page sits on white if nothing opaque was found.
+          let out = { r: 255, g: 255, b: 255 };
+          for (let i = layers.length - 1; i >= 0; i -= 1) {
+            const l = layers[i];
+            out = {
+              r: l.r * l.a + out.r * (1 - l.a),
+              g: l.g * l.a + out.g * (1 - l.a),
+              b: l.b * l.a + out.b * (1 - l.a),
+            };
+          }
+          return relLum(out);
+        };
+
+        const bad = [];
+        document.querySelectorAll("body *").forEach((el) => {
+          const text = [...el.childNodes]
+            .filter((n) => n.nodeType === 3 && n.textContent.trim())
+            .map((n) => n.textContent.trim())
+            .join(" ");
+          if (!text) return;
+          const style = getComputedStyle(el);
+          if (style.visibility === "hidden" || style.display === "none") return;
+          if (parseFloat(style.opacity) < 0.35) return;   // deliberately dimmed
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 4 || rect.height < 4) return;
+
+          const fgColor = parse(style.color);
+          if (!fgColor || fgColor.a === 0) return;
+          const fg = relLum(fgColor);
+          const bg = effectiveBg(el);
+          const ratio = (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+          // 3:1 rather than 4.5:1 - most of this is large or semibold, and the
+          // point is catching invisible text, not auditing to spec.
+          if (ratio < 3) {
+            bad.push({
+              where: el.className || el.tagName,
+              text: text.slice(0, 30),
+              ratio: Math.round(ratio * 100) / 100,
+            });
+          }
+        });
+        return bad;
+      });
+
+      expect(offenders, `unreadable text on ${target}`).toEqual([]);
+    });
+  }
 });

@@ -7,48 +7,50 @@
    so "Family" is the same orange here as on your phone. The theme's job is to sit
    behind them without fighting them.
 
+   The default themes are LIGHT, and that is a correction rather than a taste call.
+   This started dark; on the actual panel - a glossy touchscreen in a lit room - a
+   dark ground behaved like a mirror, every low-contrast tint read as muddy haze,
+   and it fought the events, because Google's palette is light pastel chips with
+   dark text designed for a light background. A dark palette is still perfectly
+   supported (see NIGHT_THEME) - it just isn't the right default for a wall.
+
    --------------------------------------------------------------------------
    THE SHAPE OF A THEME
    --------------------------------------------------------------------------
 
      {
-       name:      "August — heat",   // for your reference only
-       accent:    "#e0873c",         // REQUIRED. today, active rail, buttons, links
-       secondary: "#8c4a2f",         // the other end of every gradient
-       base:      "#15100c",         // the page behind everything
-       surface:   "#241a13",         // day cells, panels, the calendar's ground
-       lines:     "#4a3527",         // grid lines between days
-       strength:  1.0,              // how strong the translucent tints are
+       name:    "August — heat",  // for your reference only
+       accent:  "#c2662c",        // REQUIRED
+       base:    "#f7f1ea",        // the room-facing ground
+       surface: "#ffffff",        // day cells, panels, cards
+       lines:   "#ecdfd2",        // the hairline grid
+       text:    "#22201d",        // body text
+       textDim: "#6f6a63",        // labels and secondary text
+       strength: 1.0,             // how strongly the accent tints things
      }
 
-   Only `accent` is required. Anything you leave out is derived from it, so this
-   is a complete, valid theme:
+   Only `accent` is required. Everything else is derived, so this is a complete,
+   valid theme:
 
-     { name: "Just one colour", accent: "#8a6fd4" }
+     { name: "Just one colour", accent: "#4f86c6" }
 
-   ...and it will look like the old single-hue behaviour. Add fields as you want
-   more control:
+   What each field does:
 
-     accent      the one colour that has to be legible on its own - it paints
-                 today's date pill, the active rail item, buttons and links
-     secondary   pairs with accent in the header and page gradients. Pick
-                 something a few steps darker or a neighbouring hue; two colours
-                 far apart look like a fault rather than a gradient
-     base        the darkest ground. Keep it dark - light values wreck contrast
-                 with the white text, which the theme deliberately can't change
-     surface     day cells and panels. Should be a little lighter than base, and
-                 usually tinted toward the accent
-     lines       the grid between days. Between surface and accent in lightness;
-                 this is what makes the grid read as a grid rather than as gaps
-     strength    multiplies every translucent tint at once:
-                   0    no theming at all (same as switching themes off)
-                   0.5  barely there
-                   1.0  default: clearly seasonal, still calm
-                   1.6  bold; good for a wall seen from across a room
-                   2.5  loud. Look at it from your actual chair first
-
-   Text colour, contrast and type NEVER change with a theme, at any strength.
-   That isn't an oversight: this is read from a distance.
+     accent    the one colour that must read on its own. It paints today's cell
+               and date, the rule under the header, and the active rail item.
+               Used decisively in a few places rather than smeared everywhere -
+               an earlier version tinted every surface and just looked muddy
+     base      the ground behind everything
+     surface   day cells and panels. Usually white, or barely off it
+     lines     the grid between days. Wants to be clearly visible but quiet -
+               this is what makes the grid read as a grid
+     text      body text. Derived from `base`'s lightness if you omit it, so a
+               dark `base` automatically gets light text
+     textDim   labels, weekday names, secondary detail
+     strength  scales the accent tints (today's fill, the header rule):
+                 0    no accent tinting at all
+                 1.0  default
+                 1.6  bolder; useful on a wall seen from further away
 
    --------------------------------------------------------------------------
    HOW TO MAKE YOUR OWN
@@ -58,8 +60,8 @@
       open devtools and run:
 
         localStorage.wallcal_theme = JSON.stringify({
-          name: "test", accent: "#8a6fd4", secondary: "#4b3b7a",
-          base: "#13111c", surface: "#1e1b2b", lines: "#3a3352", strength: 1.3
+          name: "test", accent: "#4f86c6", base: "#f2f4f7",
+          surface: "#ffffff", lines: "#dde3ea"
         }); location.reload()
 
       That pins ONE theme for every month - the fastest way to judge a palette.
@@ -75,7 +77,7 @@
    3. Happy with it? Put it in MONTHLY_THEMES below and push. The wall redeploys
       itself within seconds.
 
-   4. Off entirely, back to flat dark mode and Google blue:
+   4. Off entirely, back to the plain default palette:
 
         localStorage.calendar_themes = "off"; location.reload()
 
@@ -83,57 +85,68 @@
    PICKING COLOURS THAT WORK
    --------------------------------------------------------------------------
 
+   - Judge it on the wall, from where you actually stand. A palette that looks
+     refined on a laptop six inches away can vanish into glare across a room.
+     Two attempts at this were tuned on screenshots and both were wrong.
    - Google's event colours are soft pastels: #a4bdfc #7ae7bf #dbadff #ff887c
-     #fbd75b #ffb878 #46d6db #5484ed #51b749 #dc2127. Don't pick an accent close
-     to the ones your own calendars use, or events blend into their background.
-   - `base` and `surface` want to stay dark. Around #101010–#2a2a2a is the useful
-     range; past that the white text starts to struggle.
-   - Keep `secondary` in the same neighbourhood as `accent`. Complementary pairs
-     read as a bug.
-   - Pure greys everywhere give you no theme - that's what "off" is for.
+     #fbd75b #ffb878 #46d6db #5484ed #51b749 #dc2127. Keep `accent` away from the
+     ones your own calendars use, or today's highlight will look like an event.
+   - `accent` needs enough depth to hold its own against white - mid-tone and
+     saturated. Pale accents disappear; near-black ones stop reading as a colour.
+   - `lines` too faint and the grid dissolves; too dark and it looks like a
+     spreadsheet. Around 10-15% darker than `surface` is the useful range.
    ========================================================================== */
 
 /* Copy this whole block, rename it, change the colours. */
 const THEME_TEMPLATE = {
   name: "Template — copy me",
-  accent: "#8a6fd4",     // required
-  secondary: "#4b3b7a",  // gradient partner
-  base: "#13111c",       // page ground
-  surface: "#1e1b2b",    // day cells and panels
-  lines: "#3a3352",      // grid lines
-  strength: 1.0,         // 0 = off, 1 = default, >1 = bolder
+  accent: "#4f86c6",     // required: today, active rail, the header rule
+  base: "#f4f1ec",       // the room-facing ground
+  surface: "#ffffff",    // day cells, panels, cards
+  lines: "#e2dcd2",      // hairline grid
+  text: "#22201d",       // body text
+  textDim: "#6f6a63",    // labels, secondary text
+  strength: 1.0,         // 0 = no accent tinting, 1 = default
 };
 
-/* January first. Seasonal rather than arbitrary: cold light through winter,
-   greens through spring, teal at midsummer, amber into rust for autumn, back to
-   cold blue for December. Each one shifts its ground as well as its accent, which
-   is what stops February and August looking like the same screen. */
+/* January first.
+
+   These are light on purpose. The wall is a glossy touchscreen in a lit room: a
+   dark ground turns it into a mirror, and it fought the events, since Google's
+   palette is light pastel chips meant for a light background.
+
+   Each month only shifts its accent and warms or cools its paper very slightly -
+   enough that August isn't February, not so much that it looks like a different
+   app. The accent shows up on today, the header rule and the active rail item. */
 const MONTHLY_THEMES = [
-  { name: "January — cold light", accent: "#7aa2d6", secondary: "#3f5b80",
-    base: "#0f1319", surface: "#182029", lines: "#2c3b4d", strength: 1.0 },
-  { name: "February — late winter", accent: "#c98bb0", secondary: "#7d4f68",
-    base: "#141016", surface: "#211a22", lines: "#3d2d38", strength: 1.0 },
-  { name: "March — first green", accent: "#6fae7c", secondary: "#3d6b4a",
-    base: "#0f1411", surface: "#18211b", lines: "#2b3f31", strength: 1.0 },
-  { name: "April — spring", accent: "#7bbf6a", secondary: "#467a3c",
-    base: "#101410", surface: "#1a231a", lines: "#2f452c", strength: 1.0 },
-  { name: "May — full leaf", accent: "#9ac45c", secondary: "#5f7f33",
-    base: "#111410", surface: "#1e2418", lines: "#374428", strength: 1.0 },
-  { name: "June — midsummer", accent: "#4fb3a6", secondary: "#2c6b64",
-    base: "#0e1413", surface: "#16211f", lines: "#274039", strength: 1.0 },
-  { name: "July — high summer", accent: "#e8a33d", secondary: "#96601c",
-    base: "#15110b", surface: "#231c12", lines: "#453522", strength: 1.0 },
-  { name: "August — heat", accent: "#e0873c", secondary: "#8c4a2f",
-    base: "#15100c", surface: "#241a13", lines: "#4a3527", strength: 1.0 },
-  { name: "September — turning", accent: "#c9772f", secondary: "#7d4522",
-    base: "#14100c", surface: "#221a13", lines: "#453023", strength: 1.0 },
-  { name: "October — rust", accent: "#d2652f", secondary: "#7a3418",
-    base: "#150e0b", surface: "#241610", lines: "#4a2a1d", strength: 1.1 },
-  { name: "November — bare", accent: "#a8613f", secondary: "#633a26",
-    base: "#12100e", surface: "#1e1815", lines: "#3a2c24", strength: 1.0 },
-  { name: "December — cold blue", accent: "#5f93c4", secondary: "#33527a",
-    base: "#0e1116", surface: "#161d26", lines: "#283747", strength: 1.0 },
+  { name: "January — cold light",   accent: "#5b7fa8", base: "#f0f2f5", surface: "#ffffff", lines: "#dde2e8" },
+  { name: "February — late winter", accent: "#a3628a", base: "#f5f0f3", surface: "#ffffff", lines: "#e6dce2" },
+  { name: "March — first green",    accent: "#4f8a63", base: "#f0f4f0", surface: "#ffffff", lines: "#dde6dd" },
+  { name: "April — spring",         accent: "#5d9a4e", base: "#f2f5ef", surface: "#ffffff", lines: "#e0e7db" },
+  { name: "May — full leaf",        accent: "#6f9a3a", base: "#f4f5ec", surface: "#ffffff", lines: "#e4e7d8" },
+  { name: "June — midsummer",       accent: "#2f8f86", base: "#eef4f3", surface: "#ffffff", lines: "#d9e6e4" },
+  { name: "July — high summer",     accent: "#c07a1e", base: "#f7f2e8", surface: "#ffffff", lines: "#ebe1cf" },
+  { name: "August — heat",          accent: "#c2662c", base: "#f7f1ea", surface: "#ffffff", lines: "#ecdfd2" },
+  { name: "September — turning",    accent: "#b05f26", base: "#f6f0e9", surface: "#ffffff", lines: "#eaddd0" },
+  { name: "October — rust",         accent: "#b4501f", base: "#f7eee8", surface: "#ffffff", lines: "#ecd9cd" },
+  { name: "November — bare",        accent: "#8d5334", base: "#f4efea", surface: "#ffffff", lines: "#e6dbd1" },
+  { name: "December — cold blue",   accent: "#41709e", base: "#eff2f6", surface: "#ffffff", lines: "#dbe2ea" },
 ];
+
+/* Kept for after dark, or if you simply prefer it. Pin it with:
+     localStorage.wallcal_theme = JSON.stringify(NIGHT_THEME)
+   ...or copy these values into MONTHLY_THEMES. Note that a dark ground needs
+   light text, which is why text/textDim are part of a theme at all. */
+const NIGHT_THEME = {
+  name: "Night",
+  accent: "#7aa2d6",
+  base: "#12141a",
+  surface: "#1b1e26",
+  lines: "#2c303a",
+  text: "#f0f0f0",
+  textDim: "#8a8f9c",
+  strength: 1.0,
+};
 
 /* ==========================================================================
    Plumbing below. You shouldn't need to touch this to make a theme.
@@ -142,10 +155,11 @@ const MONTHLY_THEMES = [
 const THEME_OFF = {
   name: "off",
   accent: "#4285F4",
-  secondary: "#4285F4",
-  base: "#111318",
-  surface: "#1c1f26",
-  lines: "#2c303a",
+  base: "#f4f1ec",
+  surface: "#ffffff",
+  lines: "#e2dcd2",
+  text: "#22201d",
+  textDim: "#6f6a63",
   strength: 0,
 };
 
@@ -168,19 +182,35 @@ function mix(aHex, bHex, t) {
   return toHex(a.map((v, i) => v + (b[i] - v) * t));
 }
 
-/** Fills in everything a theme omitted, so `{ accent }` alone is a valid theme. */
+/** Relative luminance, used to decide whether a palette is light or dark so text
+ *  can default sensibly instead of the theme having to spell it out. */
+function luminance(hex) {
+  const rgb = parseHex(hex) || [255, 255, 255];
+  return (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+}
+
+/** Fills in everything a theme omitted, so `{ accent: "#4f86c6" }` alone is a
+ *  valid theme. Text defaults follow the ground's lightness, which is what lets a
+ *  dark palette work without every field being restated. */
 function resolveTheme(theme) {
   const accent = parseHex(theme && theme.accent) ? theme.accent : THEME_OFF.accent;
-  const base = theme.base || mix(THEME_OFF.base, accent, 0.05);
+  const base = theme.base || THEME_OFF.base;
+  const surface = theme.surface || mix(base, "#ffffff", 0.6);
+  const isDark = luminance(base) < 0.5;
+
   return {
     name: theme.name || "",
     accent,
-    // Default partner is a darker accent rather than a second hue - safe, and
-    // still reads as a gradient.
-    secondary: theme.secondary || mix(accent, "#000000", 0.45),
     base,
-    surface: theme.surface || mix(base, accent, 0.08),
-    lines: theme.lines || mix(theme.surface || mix(base, accent, 0.08), accent, 0.28),
+    surface,
+    lines: theme.lines || mix(surface, isDark ? "#ffffff" : "#000000", 0.12),
+    text: theme.text || (isDark ? "#f0f0f0" : "#22201d"),
+    textDim: theme.textDim || (isDark ? "#8a8f9c" : "#6f6a63"),
+    // Faint fills have to darken a light ground and lighten a dark one.
+    tint: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
+    tintStrong: isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)",
+    // Text placed directly on the accent.
+    onAccent: luminance(accent) > 0.6 ? "#1d1d1d" : "#ffffff",
     strength: theme.strength == null ? 1 : Number(theme.strength),
   };
 }
@@ -218,13 +248,20 @@ function applyMonthTheme(monthNumber) {
 
   root.style.setProperty("--accent", t.accent);
   root.style.setProperty("--accent-rgb", rgb(t.accent));
-  root.style.setProperty("--accent2", t.secondary);
-  root.style.setProperty("--accent2-rgb", rgb(t.secondary));
   root.style.setProperty("--bg", t.base);
   root.style.setProperty("--surface", t.surface);
-  // Slightly lifted surface, used for today's cell and the rail's active item.
-  root.style.setProperty("--surface-hi", mix(t.surface, "#ffffff", 0.06));
-  root.style.setProperty("--grid-line", t.lines);
+  // A slightly shifted surface for active/hovered things, in whichever direction
+  // this palette has room to move.
+  root.style.setProperty(
+    "--surface-hi",
+    mix(t.surface, luminance(t.surface) < 0.5 ? "#ffffff" : "#000000", 0.05)
+  );
+  root.style.setProperty("--border", t.lines);
+  root.style.setProperty("--text", t.text);
+  root.style.setProperty("--text-dim", t.textDim);
+  root.style.setProperty("--tint", t.tint);
+  root.style.setProperty("--tint-strong", t.tintStrong);
+  root.style.setProperty("--on-accent", t.onAccent);
   root.style.setProperty(
     "--theme-strength",
     String(Number.isFinite(t.strength) ? t.strength : 1)

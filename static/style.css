@@ -2,13 +2,23 @@
   --header-height: clamp(54px, 8vh, 78px);
   --weekday-row-height: clamp(22px, 3.4vh, 34px);
   --rail-width: 92px;
-  --bg: #111318;
-  --surface: #1c1f26;
-  --surface-hi: #23272f;
-  --border: #2c303a;
-  --text: #f2f2f2;
-  --text-dim: #8a8f9c;
+  /* Light by default. This started dark, and on the actual panel - a glossy
+     touchscreen in a lit room - a dark ground turned into a mirror, and every
+     careful low-contrast tint read as muddy brown haze. It also fought the event
+     colours: Google's palette is light pastel chips with dark text, designed for
+     a light background. themes.js can still define a dark palette for night. */
+  --bg: #f4f1ec;          /* the room-facing ground: warm off-white, not clinical */
+  --surface: #ffffff;     /* day cells, panels, cards */
+  --surface-hi: #fbf7f0;  /* today, hovered/active surfaces */
+  --border: #e2dcd2;      /* hairline grid and dividers */
+  --text: #22201d;
+  --text-dim: #6f6a63;
   --accent: #4285F4;
+  --on-accent: #ffffff;   /* text that sits directly on the accent */
+  /* Neutral overlay used for faint fills, so they work on light or dark grounds
+     instead of assuming white-over-dark. */
+  --tint: rgba(0, 0, 0, 0.04);
+  --tint-strong: rgba(0, 0, 0, 0.08);
   --spotify-green: #1DB954;
 
   /* Plain px per breakpoint rather than clamp() on purpose: calendar.js reads
@@ -32,9 +42,6 @@
   --theme-strength: 1;
   /* The rest of the palette themes.js sets. Defaults here keep the page sane if a
      script fails to load. */
-  --accent2: #4285F4;
-  --accent2-rgb: 66 133 244;
-  --grid-line: #2c303a;
 }
 
 /* 1024x600 (official Pi 7" DSI) - the tightest target. */
@@ -146,8 +153,8 @@ html {
 
 #demo-banner {
   flex: 0 0 auto;
-  background: rgba(251, 188, 5, 0.15);
-  color: #ffd479;
+  background: #fdf0c8;
+  color: #6b4e00;
   font-size: 0.78rem;
   text-align: center;
   padding: 4px 8px;
@@ -268,7 +275,7 @@ html {
   text-align: center;
   padding: 12px 6px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--tint);
 }
 
 .forecast-name { font-size: 0.8rem; color: var(--text-dim); }
@@ -283,7 +290,7 @@ html {
   left: 50%;
   transform: translateX(-50%);
   background: #d33;
-  color: #fff;
+  color: var(--on-accent);
   padding: 10px 18px;
   border-radius: 8px;
   font-size: 0.9rem;
@@ -368,8 +375,8 @@ html {
   gap: 6px;
   padding: 4px 10px;
   border-radius: 12px;
-  background: rgba(251, 188, 5, 0.15);
-  color: #ffd479;
+  background: #fdf0c8;
+  color: #6b4e00;
   font-size: 0.74rem;
   white-space: nowrap;
 }
@@ -377,7 +384,7 @@ html {
 .pill-button--accent {
   border-color: var(--accent);
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 #refresh-toggle,
@@ -524,7 +531,7 @@ html {
   flex-direction: column;
   overflow: hidden;
   gap: 1px;
-  background: var(--grid-line);
+  background: var(--border);
 }
 
 .week-row {
@@ -539,16 +546,11 @@ html {
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 1px;
   height: 100%;
-  background: var(--grid-line);
+  background: var(--border);
 }
 
-/* The calendar surface carries the month's colour too, not just the chrome around
-   it. Previously the grid stayed flat near-black while the header was seasonal,
-   which read as "dark mode with a coloured hat" rather than as a theme. */
 .day-cell {
-  background:
-    linear-gradient(rgb(var(--accent-rgb) / calc(0.055 * var(--theme-strength))), rgb(var(--accent-rgb) / calc(0.055 * var(--theme-strength)))),
-    var(--surface);
+  background: var(--surface);
   padding: 3px 4px;
   overflow: hidden;
   display: flex;
@@ -556,30 +558,27 @@ html {
   min-height: 0;
 }
 
-.day-cell.outside-month {
-  background:
-    linear-gradient(rgb(var(--accent-rgb) / calc(0.02 * var(--theme-strength))), rgb(var(--accent-rgb) / calc(0.02 * var(--theme-strength)))),
-    var(--bg);
-}
+.day-cell.outside-month { background: var(--bg); }
 .day-cell.outside-month .day-number,
-.day-cell.outside-month .event-pill { opacity: 0.45; }
+.day-cell.outside-month .event-pill { opacity: 0.4; }
 
+/* Today is the one place the accent is unmistakable, which is all it needs. */
 .day-cell.today {
-  background:
-    linear-gradient(rgb(var(--accent-rgb) / calc(0.16 * var(--theme-strength))), rgb(var(--accent-rgb) / calc(0.16 * var(--theme-strength)))),
-    var(--surface-hi);
-  box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / calc(0.55 * var(--theme-strength)));
+  background: rgb(var(--accent-rgb) / calc(0.10 * var(--theme-strength)));
+  box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / calc(0.9 * var(--theme-strength)));
 }
 
 .day-cell.today .day-number {
   background: var(--accent);
-  color: #10131a;
+  color: var(--on-accent);
   font-weight: 700;
   border-radius: 999px;
 }
 
 .day-number {
-  font-size: 0.82rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
   height: var(--day-number-height);
   min-width: var(--day-number-height);
   padding: 0 2px;
@@ -662,7 +661,7 @@ html {
   font-size: 0.72rem;
   padding: 0 5px;
   border-radius: 4px;
-  color: #fff;
+  color: var(--on-accent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -735,7 +734,7 @@ html {
 }
 
 .event-card {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--tint);
   border-left: 4px solid;
   border-radius: 6px;
   padding: 10px 12px;
@@ -884,7 +883,7 @@ html {
 .timegrid-day-head.today { color: var(--accent); }
 .timegrid-day-head.today .timegrid-day-number {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-radius: 999px;
   min-width: 1.7em;
   text-align: center;
@@ -955,7 +954,7 @@ html {
   border-radius: 5px;
   padding: 1px 5px;
   overflow: hidden;
-  color: #fff;
+  color: var(--on-accent);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.3);
 }
 
@@ -1228,7 +1227,7 @@ html {
 .quick-tile {
   display: flex;
   align-items: center;
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--tint);
   border-radius: 8px;
   overflow: hidden;
   height: 60px;
@@ -1447,8 +1446,8 @@ html {
 
 .device-note {
   display: block;
-  color: #ffd479;
-  background: rgba(251, 188, 5, 0.12);
+  color: #6b4e00;
+  background: #fdf0c8;
   font-size: 0.82rem;
   line-height: 1.4;
   margin: 0 16px 8px;
@@ -1486,7 +1485,7 @@ html {
   width: 100%;
   height: 4px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--tint-strong);
   overflow: hidden;
 }
 
@@ -1518,7 +1517,7 @@ html {
 }
 
 .transport-btn {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--tint-strong);
   border: none;
   color: var(--text);
   width: clamp(44px, 6.4vh, 58px);
@@ -1572,7 +1571,7 @@ html {
   appearance: none;
   height: 4px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--tint-strong);
 }
 
 #volume-slider::-webkit-slider-thumb {
@@ -1693,7 +1692,7 @@ html {
 
 .track-list-error {
   display: block;
-  color: #ff8a80;
+  color: #a02a1c;
   font-size: 0.85rem;
   line-height: 1.45;
   padding: 14px 16px;
@@ -1810,8 +1809,8 @@ html {
 }
 
 .browser-status--error {
-  background: rgba(234, 67, 53, 0.14);
-  color: #ff8a80;
+  background: #fdecea;
+  color: #a02a1c;
 }
 
 #browser-frame-wrap {
@@ -1846,7 +1845,7 @@ html {
   border-radius: 6px;
   border: none;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 1rem;
 }
 
@@ -2100,7 +2099,7 @@ textarea.text-input {
 }
 
 .health-badge--transient {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--tint-strong);
   color: var(--text-dim);
 }
 
@@ -2126,7 +2125,7 @@ textarea.text-input {
   border-radius: 6px;
   border: none;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 1rem;
   text-align: center;
   text-decoration: none;
@@ -2143,52 +2142,41 @@ textarea.text-input {
    cell and a perceptible wash. Text colour, contrast and event colours are still
    untouched, which was the right instinct - just applied to almost nothing. */
 
-/* Two hues, not one: a single-colour wash over a dark ground is nearly
-   indistinguishable from a flat surface, which is how the first attempt at this
-   ended up invisible. accent2 defaults to a darker accent, so a one-colour theme
-   still works. */
+/* Flat. Gradients across a whole wall of screen were what made this look
+   "hacked together": three translucent stops over a tinted ground is a lot of
+   visual noise for no information. The theme now shows up in a few decisive
+   places - today, the weekday strip, the header rule - and the ground stays
+   calm. */
 #stage {
-  background-image: linear-gradient(
-    160deg,
-    rgb(var(--accent-rgb) / calc(0.14 * var(--theme-strength))) 0%,
-    rgb(var(--accent2-rgb) / calc(0.10 * var(--theme-strength))) 55%,
-    rgb(var(--accent-rgb) / calc(0.07 * var(--theme-strength))) 100%
-  );
+  background: var(--bg);
 }
 
 /* The largest single themed surface, and the one at eye level. */
 #top-bar {
-  background-image: linear-gradient(
-    100deg,
-    rgb(var(--accent-rgb) / calc(0.26 * var(--theme-strength))) 0%,
-    rgb(var(--accent2-rgb) / calc(0.20 * var(--theme-strength))) 55%,
-    rgb(var(--accent-rgb) / calc(0.10 * var(--theme-strength))) 100%
-  );
-  border-bottom-color: rgb(var(--accent-rgb) / calc(0.5 * var(--theme-strength)));
+  background: var(--surface);
+  /* One clean accent rule under the header carries the season without tinting
+     the whole page. */
+  border-bottom: 2px solid rgb(var(--accent-rgb) / calc(0.85 * var(--theme-strength)));
 }
 
 /* Sun..Sat reads as a label row, so tinting it costs no legibility and gives the
    month an unmistakable colour across the full width. */
 #weekday-row {
-  /* Not alpha-scaled: at strength 0 this must fall back to a readable grey rather
-     than to fully transparent text. */
-  color: var(--accent);
-  background-image: linear-gradient(
-    100deg,
-    rgb(var(--accent-rgb) / calc(0.16 * var(--theme-strength))) 0%,
-    rgb(var(--accent2-rgb) / calc(0.12 * var(--theme-strength))) 100%
-  );
-  border-bottom: 2px solid rgb(var(--accent-rgb) / calc(0.5 * var(--theme-strength)));
+  color: var(--text-dim);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
 }
 
 /* Today was previously a ~30px circle. The whole cell now carries the tint, which
    is what makes "where is today" answerable from across the room. */
+/* Today is the one place the accent is unmistakable, which is all it needs. */
 .day-cell.today {
-  background:
-    linear-gradient(rgb(var(--accent-rgb) / calc(0.16 * var(--theme-strength))), rgb(var(--accent-rgb) / calc(0.16 * var(--theme-strength)))),
-    var(--surface-hi);
-  box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / calc(0.55 * var(--theme-strength)));
+  background: rgb(var(--accent-rgb) / calc(0.10 * var(--theme-strength)));
+  box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / calc(0.9 * var(--theme-strength)));
 }
 
 /* The rail's active item and the time grid's today column, for the same reason. */
@@ -2302,8 +2290,8 @@ textarea.text-input {
 #notes-reauth {
   padding: 14px 16px;
   border-radius: 10px;
-  background: rgba(251, 188, 5, 0.12);
-  color: #ffd479;
+  background: #fdf0c8;
+  color: #6b4e00;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -2523,7 +2511,7 @@ textarea.text-input {
 
 .today-event {
   border-left: 4px solid var(--accent);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--tint);
   border-radius: 8px;
   padding: 10px 12px;
   margin-bottom: 8px;
