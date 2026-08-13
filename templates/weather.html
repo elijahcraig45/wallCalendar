@@ -16,24 +16,42 @@
 <div id="wx-view">
   <section id="wx-now-col">
     <div id="wx-now"></div>
-    <div id="wx-thunder"></div>
-    <div id="wx-radar-block">
-      <h3>Radar</h3>
-      <div id="wx-radar"></div>
-    </div>
+    <div id="wx-air"></div>
+    <div id="wx-sun"></div>
   </section>
 
   <section id="wx-forecast-col">
     <h3>Next 24 hours</h3>
     <div id="wx-hourly"></div>
-    <h3>The week</h3>
+    <h3>Next 10 days</h3>
     <ul id="wx-days"></ul>
   </section>
 
   <section id="wx-alerts-col">
+    <div id="wx-radar-block">
+      {# Tapping the radar opens it full-screen: 600px of GIF in a third of a
+         column is legible but not much more than that. #}
+      <h3>Radar <span class="wx-radar-hint">tap to enlarge</span></h3>
+      <div id="wx-radar"></div>
+    </div>
+    <div id="wx-thunder"></div>
     <h3>Alerts <span id="wx-alert-count" class="wx-count hidden"></span></h3>
     <ul id="wx-alerts"></ul>
   </section>
+</div>
+
+<div id="wx-radar-overlay" class="modal-overlay hidden">
+  <div id="wx-radar-panel" class="modal-panel">
+    <button id="wx-radar-close" aria-label="Close">&times;</button>
+    <div class="wx-radar-tabs">
+      {# Local is the storm on top of you; regional is the line of storms coming. #}
+      <button class="wx-radar-tab" type="button" data-wx-radar="local">Local</button>
+      <button class="wx-radar-tab" type="button" data-wx-radar="regional">Regional</button>
+      <button class="wx-radar-tab" type="button" data-wx-radar="national">National</button>
+    </div>
+    <div id="wx-radar-big"></div>
+    <p id="wx-radar-caption" class="field-hint"></p>
+  </div>
 </div>
 {% endblock %}
 

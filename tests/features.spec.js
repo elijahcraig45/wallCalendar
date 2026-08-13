@@ -629,7 +629,7 @@ test.describe("weather page", () => {
 
     // 24 hourly cells and 7 days, from the same fixtures the /today page uses.
     expect(await page.locator(".wx-hour").count()).toBe(24);
-    expect(await page.locator(".wx-day").count()).toBe(7);
+    expect(await page.locator(".wx-day").count()).toBe(10);
 
     // The demo fixture carries three alerts, one of them already expired: the
     // expired one must not be rendered.
@@ -664,6 +664,101 @@ test.describe("weather page", () => {
     await expect(page.locator(".wx-thunder-caveat")).toContainText("not a detector");
     // CAPE band, from the fixture's 2600 J/kg afternoon.
     await expect(page.locator(".wx-thunder-cape")).toContainText("CAPE");
+  });
+
+  test("shows air quality and pollen, each attributed", async ({ page }) => {
+    await page.goto("/weather");
+
+    const air = page.locator("#wx-air");
+    await expect(air).toContainText("AQI · Moderate");
+    // The components matter: an Atlanta summer AQI is ozone, not particulates,
+    // and that changes the advice from "shut the windows" to "go out earlier".
+    await expect(air).toContainText("ozone");
+    await expect(air).toContainText("Pollen · Medium-high");
+    await expect(air).toContainText("Ragweed");
+    // Pollen is a third-party index rather than a measurement, so it says whose.
+    await expect(air).toContainText("pollen.com");
+    expect(await page.locator(".wx-air-dial").count()).toBe(2);
+  });
+
+  /* Pollen comes from an undocumented endpoint that will break one day. When it
+     does, the air quality half has to survive it. */
+  test("pollen failing leaves the air quality showing", async ({ page }) => {
+    await page.route("**/api/weather/air", async (route) => {
+      const resp = await route.fetch();
+      const data = await resp.json();
+      await route.fulfill({
+        json: {
+          ...data,
+          pollen: { available: false, source: "pollen.com" },
+          errors: ["Couldn't reach the pollen service (ReadTimeout)."],
+        },
+      });
+    });
+    await page.goto("/weather");
+    await expect(page.locator("#wx-air")).toContainText("AQI · Moderate");
+    await expect(page.locator("#wx-air")).toContainText("Pollen unavailable");
+    expect(await page.locator(".wx-air-dial").count()).toBe(1);
+  });
+
+  test("the radar opens full-screen and switches between views", async ({ page }) => {
+    await page.route("**/api/weather/radar", (route) =>
+      route.fulfill({
+        json: {
+          available: true, station: "KFFC", state: "GA", region: "SOUTHEAST",
+          loop_url: "https://radar.weather.gov/ridge/standard/KFFC_loop.gif",
+          still_url: "https://radar.weather.gov/ridge/standard/KFFC_0.gif",
+          regional_url: "https://radar.weather.gov/ridge/standard/SOUTHEAST_loop.gif",
+          national_url: "https://radar.weather.gov/ridge/standard/CONUS_loop.gif",
+        },
+      })
+    );
+    // The images are on radar.weather.gov; the test is about wiring, not pixels.
+    await page.route("https://radar.weather.gov/**", (route) => route.abort());
+    await page.goto("/weather");
+
+    const overlay = page.locator("#wx-radar-overlay");
+    await expect(overlay).toBeHidden();
+    await page.locator("#wx-radar").click();
+    await expect(overlay).toBeVisible();
+    await expect(page.locator("#wx-radar-caption")).toContainText("KFFC");
+
+    await page.locator('[data-wx-radar="regional"]').click();
+    await expect(page.locator("#wx-radar-caption")).toContainText("SOUTHEAST");
+    await expect(page.locator("#wx-radar-big img")).toHaveAttribute("src", /SOUTHEAST_loop/);
+
+    await page.locator('[data-wx-radar="national"]').click();
+    await expect(page.locator("#wx-radar-big img")).toHaveAttribute("src", /CONUS_loop/);
+
+    await page.locator("#wx-radar-close").click();
+    await expect(overlay).toBeHidden();
+  });
+
+  /* A state with no verified RIDGE regional loop must not offer the tab - the
+     alternative is a tab that loads a 404. */
+  test("no regional tab when the state has no regional loop", async ({ page }) => {
+    await page.route("**/api/weather/radar", (route) =>
+      route.fulfill({
+        json: {
+          available: true, station: "KABC", state: "ZZ", region: null,
+          loop_url: "https://radar.weather.gov/ridge/standard/KABC_loop.gif",
+          regional_url: null,
+          national_url: "https://radar.weather.gov/ridge/standard/CONUS_loop.gif",
+        },
+      })
+    );
+    await page.route("https://radar.weather.gov/**", (route) => route.abort());
+    await page.goto("/weather");
+    await page.locator("#wx-radar").click();
+    await expect(page.locator('[data-wx-radar="regional"]')).toBeHidden();
+    await expect(page.locator('[data-wx-radar="national"]')).toBeVisible();
+  });
+
+  test("the daylight card reports length and tomorrow's change", async ({ page }) => {
+    await page.goto("/weather");
+    const sun = page.locator("#wx-sun");
+    await expect(sun).toContainText(/\d+h \d\dm/);
+    await expect(sun).toContainText(/longer tomorrow|shorter tomorrow|About the same/);
   });
 
   /* Caught on the live wall: "No thunder in the next 24 hours" sat directly above
@@ -729,7 +824,7 @@ test.describe("weather page", () => {
     await page.goto("/weather");
 
     await expect(page.locator(".wx-now-temp")).toHaveText(/^-?\d+°$/);
-    expect(await page.locator(".wx-day").count()).toBe(7);
+    expect(await page.locator(".wx-day").count()).toBe(10);
     await expect(page.locator("#wx-alerts")).toContainText("Couldn't reach");
   });
 });

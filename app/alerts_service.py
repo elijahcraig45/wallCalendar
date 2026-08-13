@@ -159,6 +159,36 @@ def _fetch_alerts() -> dict:
     return _parse(payload)
 
 
+# State -> NWS RIDGE regional loop. Every name in here was probed against
+# radar.weather.gov and returned 200; the plausible-sounding ones that 404 are
+# deliberately absent (NORTHERNPLAINS, SOUTHWEST, NORTHWEST and friends don't
+# exist). A state that isn't listed simply gets no regional tab rather than a
+# broken image, which is why this maps only what was verified.
+_REGION_LOOPS = {
+    "SOUTHEAST": ("AL", "GA", "FL", "SC", "NC", "TN", "VA", "KY", "WV", "MS"),
+    "NORTHEAST": ("ME", "NH", "VT", "MA", "RI", "CT", "NY", "NJ", "PA", "MD", "DE", "DC"),
+    "SOUTHMISSVLY": ("AR", "LA", "MO"),
+    "UPPERMISSVLY": ("MN", "IA", "WI", "SD", "ND", "NE"),
+    "CENTGRLAKES": ("MI", "OH", "IN", "IL"),
+    "SOUTHPLAINS": ("TX", "OK", "KS"),
+    "SOUTHROCKIES": ("CO", "NM", "UT", "AZ"),
+    "NORTHROCKIES": ("MT", "WY", "ID"),
+    "PACSOUTHWEST": ("CA", "NV"),
+    "PACNORTHWEST": ("OR", "WA"),
+    "ALASKA": ("AK",),
+    "HAWAII": ("HI",),
+    "CARIB": ("PR", "VI"),
+}
+
+_STATE_TO_REGION = {
+    state: region for region, states in _REGION_LOOPS.items() for state in states
+}
+
+
+def _loop(name: str) -> str:
+    return f"https://radar.weather.gov/ridge/standard/{name}_loop.gif"
+
+
 def radar_station() -> dict:
     """The nearest radar and the RIDGE loop for it.
 
@@ -180,13 +210,21 @@ def radar_station() -> dict:
         if not station:
             result = {"available": False, "reason": "no radar station for this point"}
         else:
+            state = ((props.get("relativeLocation") or {}).get("properties") or {}).get("state")
+            region = _STATE_TO_REGION.get((state or "").upper())
             result = {
                 "available": True,
                 "station": station,
+                "state": state,
+                "region": region,
                 # A plain animated GIF, which is the whole appeal: no map library,
                 # no tile server, no API key, and it animates by itself.
-                "loop_url": f"https://radar.weather.gov/ridge/standard/{station}_loop.gif",
+                "loop_url": _loop(station),
                 "still_url": f"https://radar.weather.gov/ridge/standard/{station}_0.gif",
+                # Local is the storm on top of you; regional is the line of storms
+                # on the way, which the single-site view crops out entirely.
+                "regional_url": _loop(region) if region else None,
+                "national_url": _loop("CONUS"),
             }
     except Exception as exc:  # noqa: BLE001 - see docstring
         result = {"available": False, "reason": f"Couldn't reach the radar index ({type(exc).__name__})."}

@@ -61,6 +61,9 @@ DEMO_MODE = os.environ.get("WALLCAL_DEMO") == "1"
 WEATHER_LAT = float(os.environ.get("WALLCAL_LAT", "33.749"))
 WEATHER_LON = float(os.environ.get("WALLCAL_LON", "-84.388"))
 WEATHER_LABEL = os.environ.get("WALLCAL_PLACE", "Atlanta")
+# pollen.com is keyed by ZIP rather than coordinates, and there is no keyless
+# lat/lon-to-ZIP lookup worth adding a dependency for. One config value instead.
+WEATHER_ZIP = os.environ.get("WALLCAL_ZIP", "30303")
 
 # Daisy's Kitchen (github.com/elijahcraig45/daisys-kitchen). Its Firestore rules
 # make the recipes collection publicly readable, so this project id is the only

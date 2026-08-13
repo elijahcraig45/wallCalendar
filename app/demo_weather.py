@@ -14,7 +14,7 @@ import datetime as dt
 def _payload() -> dict:
     today = dt.date.today()
     # A full week now that the weather page shows seven days.
-    dates = [(today + dt.timedelta(days=i)).isoformat() for i in range(7)]
+    dates = [(today + dt.timedelta(days=i)).isoformat() for i in range(10)]
 
     return {
         "timezone": "America/New_York",
@@ -27,18 +27,25 @@ def _payload() -> dict:
             "precipitation": 0.0,
             "weather_code": 2,
             "wind_speed_10m": 4.2,
+            "wind_gusts_10m": 11.6,
+            "dew_point_2m": 70.6,
+            "uv_index": 8.1,
+            "cloud_cover": 36,
+            "pressure_msl": 1015.4,
         },
         "daily": {
             "time": dates,
             # clear / thunderstorm / rain / overcast / fog / clear / partly
-            "weather_code": [1, 95, 63, 3, 45, 0, 2],
-            "temperature_2m_max": [95.6, 88.1, 79.3, 84.0, 86.2, 90.4, 92.0],
-            "temperature_2m_min": [75.7, 72.4, 68.9, 70.2, 71.5, 73.1, 74.6],
-            "precipitation_probability_max": [13, 82, 61, 8, 20, 4, 11],
+            "weather_code": [1, 95, 63, 3, 45, 0, 2, 80, 95, 1],
+            "temperature_2m_max": [95.6, 88.1, 79.3, 84.0, 86.2, 90.4, 92.0, 87.5, 85.1, 93.3],
+            "temperature_2m_min": [75.7, 72.4, 68.9, 70.2, 71.5, 73.1, 74.6, 72.0, 70.8, 74.2],
+            "precipitation_probability_max": [13, 82, 61, 8, 20, 4, 11, 55, 70, 9],
             "sunrise": [f"{d}T06:58" for d in dates],
             "sunset": [f"{d}T20:26" for d in dates],
-            "wind_speed_10m_max": [9, 21, 14, 7, 5, 8, 10],
-            "uv_index_max": [8, 5, 4, 7, 6, 9, 9],
+            "wind_speed_10m_max": [9, 21, 14, 7, 5, 8, 10, 16, 19, 8],
+            "uv_index_max": [8, 5, 4, 7, 6, 9, 9, 6, 5, 9],
+            "precipitation_sum": [0.0, 0.9, 0.4, 0.0, 0.0, 0.0, 0.0, 0.2, 0.6, 0.0],
+            "daylight_duration": [48494.0] * 10,
         },
         # 48 hours, so the hourly strip has something to scroll through. Starts at
         # local midnight like the real series does, which is what makes the
@@ -156,6 +163,54 @@ def get_alerts() -> dict:
     result["available"] = True
     result["fetched_at"] = dt.datetime.now().isoformat(timespec="seconds")
     return alerts_service._drop_expired(result)
+
+
+# Air quality and pollen, run through the real parsers so a shape change in
+# air_service breaks the demo too. Deliberately mid-scale rather than benign: a
+# fixture that always says "Good / Low" never shows you the bands or the colours.
+def get_air() -> dict:
+    from app import air_service
+
+    aqi = air_service._parse_aqi(
+        {
+            "current": {
+                "time": dt.datetime.now().isoformat(timespec="minutes"),
+                "us_aqi": 82,
+                "pm2_5": 14.3,
+                "pm10": 19.8,
+                # Ozone-led, which is what an Atlanta summer actually looks like.
+                "ozone": 121.0,
+                "nitrogen_dioxide": 6.4,
+            }
+        }
+    )
+    pollen = air_service._parse_pollen(
+        {
+            "Location": {
+                "DisplayLocation": "Atlanta, GA",
+                "periods": [
+                    {"Type": "Yesterday", "Index": 6.8, "Triggers": [{"Name": "Grasses"}]},
+                    {
+                        "Type": "Today",
+                        "Index": 7.6,
+                        "Triggers": [
+                            {"Name": "Grasses"},
+                            {"Name": "Ragweed"},
+                            {"Name": "Chenopods"},
+                        ],
+                    },
+                    {"Type": "Tomorrow", "Index": 5.1, "Triggers": [{"Name": "Ragweed"}]},
+                ],
+            }
+        }
+    )
+    return {
+        "aqi": aqi,
+        "pollen": pollen,
+        "errors": [],
+        "stale": False,
+        "fetched_at": dt.datetime.now().isoformat(timespec="seconds"),
+    }
 
 
 def get_weather() -> dict:

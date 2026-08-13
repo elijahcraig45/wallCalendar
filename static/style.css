@@ -2684,7 +2684,7 @@ textarea.text-input {
   /* Conditions are compact and fixed; the forecast needs the most room; alerts
      need enough width that a long headline doesn't become a column of single
      words. */
-  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr) minmax(300px, 1.4fr);
+  grid-template-columns: minmax(280px, 1fr) minmax(0, 1.9fr) minmax(330px, 1.5fr);
   gap: 18px;
   padding: 16px 18px;
 }
@@ -2809,7 +2809,9 @@ textarea.text-input {
 
 /* the week */
 
-#wx-days { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; flex: 1; }
+/* Ten rows, so this genuinely scrolls on a 600px panel and must not push the
+   hourly strip off the top. */
+#wx-days { list-style: none; margin: 0; padding: 0 2px 0 0; overflow-y: auto; min-height: 0; flex: 1; }
 
 .wx-day {
   display: grid;
@@ -2897,6 +2899,144 @@ textarea.text-input {
 #weather-more { display: inline-block; margin-top: 12px; text-decoration: none; }
 
 .wx-alert-fullarea { color: var(--text-dim); font-size: 0.78rem !important; }
+
+/* ---------- air quality + pollen ---------- */
+
+.wx-air-body {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.wx-air-row { display: flex; align-items: center; gap: 14px; }
+
+/* A filled disc in the scale's own colour. Both scales are ones people have seen
+   elsewhere (EPA for AQI, IQVIA for pollen), so they're borrowed rather than
+   invented - a bespoke palette would be less readable, not more. */
+.wx-air-dial {
+  flex: 0 0 auto;
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: var(--wx-dial, var(--accent));
+  /* Set per dial from the fill's luminance - white is unreadable on the green and
+     yellow bands. See wxTextOn() in wxpage.js. */
+  color: var(--wx-dial-fg, #ffffff);
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 1px;
+  padding-top: 16px;
+  box-sizing: border-box;
+}
+
+.wx-air-value { font-size: 1.25rem; font-weight: 700; line-height: 1; }
+.wx-air-scale { font-size: 0.7rem; opacity: 0.85; }
+
+.wx-air-text { min-width: 0; }
+.wx-air-label { font-size: 0.95rem; font-weight: 600; }
+.wx-air-note { font-size: 0.8rem; color: var(--text-dim); margin-top: 2px; }
+.wx-air-parts { font-size: 0.76rem; color: var(--text-dim); margin-top: 3px; }
+
+.wx-air-source {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+/* ---------- radar, thumbnail and full-screen ---------- */
+
+.wx-radar-hint {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 6px;
+}
+
+#wx-radar { cursor: pointer; }
+
+#wx-radar-panel {
+  /* Nearly the whole panel: the point of opening this is size. */
+  width: min(92vw, 1100px);
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#wx-radar-big {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+#wx-radar-big .wx-radar-img {
+  max-width: 100%;
+  max-height: 78vh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.wx-radar-tabs { display: flex; gap: 8px; }
+
+.wx-radar-tab {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 7px 16px;
+  font: inherit;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.wx-radar-tab--active {
+  background: var(--accent);
+  color: var(--on-accent);
+  border-color: var(--accent);
+}
+
+/* ---------- small print shared by the conditions grid and day rows ---------- */
+
+.wx-sub { font-size: 0.72rem; color: var(--text-dim); font-weight: 400; }
+.wx-gust { font-size: 0.78rem; color: var(--accent); font-weight: 600; }
+
+/* ---------- daylight card ---------- */
+
+.wx-sun-body { background: var(--surface); border-radius: 12px; padding: 14px 16px; }
+.wx-sun-length { font-size: 1.5rem; font-weight: 600; line-height: 1; }
+.wx-sun-change { font-size: 0.8rem; color: var(--text-dim); margin-top: 4px; }
+
+.wx-sun-times {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* A plain arc between the two times, standing in for the sun's path. Cheaper and
+   calmer than a chart, and it makes the pair read as a span rather than two
+   unrelated numbers. */
+.wx-sun-arc {
+  flex: 1;
+  height: 14px;
+  border-top: 2px solid var(--accent);
+  border-radius: 50% 50% 0 0 / 100% 100% 0 0;
+  opacity: 0.55;
+}
 
 /* `!important`, and it's the right call for exactly this rule.
 

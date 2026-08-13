@@ -105,6 +105,11 @@ def _parse(payload: dict) -> dict:
                 "sunset": day(index, "sunset"),
                 "wind_max": _round(day(index, "wind_speed_10m_max")),
                 "uv_max": _round(day(index, "uv_index_max")),
+                "precip_total": day(index, "precipitation_sum"),
+                "daylight_minutes": (
+                    None if day(index, "daylight_duration") is None
+                    else round(day(index, "daylight_duration") / 60)
+                ),
             }
         )
 
@@ -137,6 +142,13 @@ def _parse(payload: dict) -> dict:
         "feels_like": _round(current.get("apparent_temperature")),
         "humidity": current.get("relative_humidity_2m"),
         "wind": _round(current.get("wind_speed_10m")),
+        "gusts": _round(current.get("wind_gusts_10m")),
+        "dew_point": _round(current.get("dew_point_2m")),
+        # The live UV, rather than the day's maximum the daily block reports - at
+        # 8pm those are very different numbers and only one of them is useful.
+        "uv_index": _round(current.get("uv_index")),
+        "cloud_cover": current.get("cloud_cover"),
+        "pressure": _round(current.get("pressure_msl")),
         "is_day": bool(current.get("is_day", 1)),
         "label": label,
         "icon": icon,
@@ -201,10 +213,12 @@ def _fetch_once() -> dict:
             "latitude": WEATHER_LAT,
             "longitude": WEATHER_LON,
             "current": "temperature_2m,relative_humidity_2m,apparent_temperature,"
-                       "is_day,precipitation,weather_code,wind_speed_10m",
+                       "is_day,precipitation,weather_code,wind_speed_10m,"
+                       "wind_gusts_10m,dew_point_2m,uv_index,cloud_cover,pressure_msl",
             "daily": "weather_code,temperature_2m_max,temperature_2m_min,"
                      "precipitation_probability_max,sunrise,sunset,"
-                     "wind_speed_10m_max,uv_index_max",
+                     "wind_speed_10m_max,uv_index_max,precipitation_sum,"
+                     "daylight_duration",
             # CAPE is the honest thunderstorm signal available here: Open-Meteo
             # accepts `lightning_potential` but returns all nulls for US
             # locations, so instability plus the WMO thunder codes is what there
@@ -212,7 +226,7 @@ def _fetch_once() -> dict:
             "hourly": "temperature_2m,precipitation_probability,weather_code,"
                       "apparent_temperature,wind_speed_10m,cape,is_day",
             "timezone": "auto",
-            "forecast_days": 7,
+            "forecast_days": 10,
             "temperature_unit": "fahrenheit",
             "wind_speed_unit": "mph",
             "precipitation_unit": "inch",

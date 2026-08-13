@@ -19,10 +19,16 @@ const wxDays = document.getElementById("wx-days");
 const wxAlerts = document.getElementById("wx-alerts");
 const wxAlertCount = document.getElementById("wx-alert-count");
 const wxRadar = document.getElementById("wx-radar");
+const wxRadarBig = document.getElementById("wx-radar-big");
+const wxRadarCaption = document.getElementById("wx-radar-caption");
+const wxAir = document.getElementById("wx-air");
+const wxSun = document.getElementById("wx-sun");
 const wxUpdated = document.getElementById("wx-updated");
 
 const WX_ALERTS_MS = 3 * 60 * 1000;
 const WX_RADAR_MS = 4 * 60 * 1000;
+// Air quality moves over hours and pollen is published once a day.
+const WX_AIR_MS = 30 * 60 * 1000;
 
 function wxEscape(text) {
   const div = document.createElement("div");
@@ -64,13 +70,22 @@ onWeather((data) => {
     <dl class="wx-now-grid">
       <div><dt>Feels like</dt><dd>${data.feels_like}°</dd></div>
       <div><dt>Humidity</dt><dd>${data.humidity}%</dd></div>
-      <div><dt>Wind</dt><dd>${data.wind} mph</dd></div>
-      ${today ? `<div><dt>UV index</dt><dd>${today.uv_max ?? "—"}</dd></div>` : ""}
+      <div><dt>Wind</dt><dd>${data.wind}${
+        // Gusts only when they're meaningfully above the steady wind; "8 mph,
+        // gusting 9" is noise.
+        data.gusts != null && data.gusts >= data.wind + 5 ? ` <span class="wx-gust">g${data.gusts}</span>` : ""
+      } mph</dd></div>
+      <div><dt>UV now</dt><dd>${data.uv_index ?? "—"}${
+        today && today.uv_max != null ? `<span class="wx-sub"> peak ${today.uv_max}</span>` : ""
+      }</dd></div>
+      <div><dt>Dew point</dt><dd>${data.dew_point ?? "—"}°</dd></div>
+      <div><dt>Cloud</dt><dd>${data.cloud_cover ?? "—"}%</dd></div>
       <div><dt>Sunrise</dt><dd>${wxTime(data.sunrise)}</dd></div>
       <div><dt>Sunset</dt><dd>${wxTime(data.sunset)}</dd></div>
     </dl>
     ${data.stale ? '<p class="wx-stale">Showing the last reading — couldn\'t reach the service.</p>' : ""}`;
 
+  wxRenderSun(data);
   wxRenderThunder(data);
   wxRenderHourly(data.hours || []);
   wxRenderDays(data.days || []);
@@ -181,9 +196,15 @@ function wxRenderDays(days) {
       const width = Math.max(4, ((day.high - day.low) / span) * 100);
       return `
       <li class="wx-day">
-        <div class="wx-day-name">${index === 0 ? "Today" : wxEscape(shortDay(day.date))}</div>
+        <div class="wx-day-name">${index === 0 ? "Today" : wxEscape(shortDay(day.date))}${
+          // Ten days runs past one weekday cycle, so "Sat" alone is ambiguous
+          // once you're a week out.
+          index >= 7 ? `<span class="wx-sub"> ${new Date(day.date + "T00:00:00").getDate()}</span>` : ""
+        }</div>
         <div class="wx-day-icon">${weatherIcon(day.icon)}</div>
-        <div class="wx-day-precip">${day.precip_chance ? `${day.precip_chance}%` : ""}</div>
+        <div class="wx-day-precip">${day.precip_chance ? `${day.precip_chance}%` : ""}${
+          day.precip_total ? `<span class="wx-sub"> ${day.precip_total}"</span>` : ""
+        }</div>
         <div class="wx-day-low">${day.low}°</div>
         <div class="wx-day-track">
           <span class="wx-day-bar" style="left:${left}%;width:${width}%"></span>
@@ -276,9 +297,216 @@ async function wxLoadAlerts() {
   }
 }
 
-/* ---------- radar ---------- */
 
-let wxRadarUrl = null;
+
+/* ---------- daylight ----------
+ * From data already fetched. Worth a card on a kitchen wall because the number
+ * people actually want in August is "how much evening is left", and in December
+ * it's "is it getting better yet" - and the day-over-day change answers the second
+ * one in a way sunset time alone doesn't.
+ */
+
+function wxDuration(minutes) {
+  if (minutes == null) return "";
+  return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+function wxRenderSun(data) {
+  const days = data.days || [];
+  const today = days[0];
+  const tomorrow = days[1];
+  if (!today || today.daylight_minutes == null) {
+    wxSun.innerHTML = "";
+    return;
+  }
+
+  const change =
+    tomorrow && tomorrow.daylight_minutes != null
+      ? tomorrow.daylight_minutes - today.daylight_minutes
+      : null;
+  // Rounded to the minute, and "about the same" rather than "0 minutes longer",
+  // which is what it says for a week either side of a solstice.
+  const changeText =
+    change == null
+      ? ""
+      : Math.abs(change) < 1
+        ? "About the same tomorrow"
+        : `${wxDuration(Math.abs(Math.round(change)))} ${change > 0 ? "longer" : "shorter"} tomorrow`;
+
+  wxSun.innerHTML = `<h3>Daylight</h3>
+    <div class="wx-sun-body">
+      <div class="wx-sun-length">${wxDuration(today.daylight_minutes)}</div>
+      <div class="wx-sun-change">${wxEscape(changeText)}</div>
+      <div class="wx-sun-times">
+        <span>${wxEscape(wxTime(data.sunrise))}</span>
+        <span class="wx-sun-arc" aria-hidden="true"></span>
+        <span>${wxEscape(wxTime(data.sunset))}</span>
+      </div>
+    </div>`;
+}
+
+/* ---------- air quality and pollen ----------
+ * Two providers: AQI from Open-Meteo, pollen from pollen.com, because Open-Meteo's
+ * pollen variables are null for US locations (they're CAMS Europe). They fail
+ * independently, so one being absent must not blank the other.
+ */
+
+// AQI colours are the EPA's own, which people already recognise from air-quality
+// maps - inventing a palette here would be worse than borrowing the standard one.
+const WX_AQI_COLORS = [
+  { limit: 50, color: "#3ea72d" },
+  { limit: 100, color: "#c8a415" },
+  { limit: 150, color: "#d8762a" },
+  { limit: 200, color: "#c0272d" },
+  { limit: 300, color: "#8f3f97" },
+  { limit: Infinity, color: "#7e0023" },
+];
+
+const WX_POLLEN_COLORS = [
+  { limit: 2.4, color: "#3ea72d" },
+  { limit: 4.8, color: "#9bbf30" },
+  { limit: 7.2, color: "#c8a415" },
+  { limit: 9.6, color: "#d8762a" },
+  { limit: Infinity, color: "#c0272d" },
+];
+
+const wxColorFor = (scale, value) =>
+  (scale.find((b) => value <= b.limit) || scale[scale.length - 1]).color;
+
+/** Black or white, whichever reads on the given fill.
+ *  The dials were white-on-colour throughout, which is fine on the reds and the
+ *  purple and badly wrong on the greens and yellows - white on the "Moderate"
+ *  yellow (#c8a415) measures 2.3:1. Caught by the contrast sweep, which is exactly
+ *  the class of thing it exists for. */
+function wxTextOn(hex) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  const channel = (v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const lum =
+    0.2126 * channel((n >> 16) & 255) +
+    0.7152 * channel((n >> 8) & 255) +
+    0.0722 * channel(n & 255);
+  // Compare both candidates rather than guessing a threshold.
+  const onWhite = 1.05 / (lum + 0.05);
+  const onBlack = (lum + 0.05) / 0.05;
+  return onBlack >= onWhite ? "#1b1b1b" : "#ffffff";
+}
+
+function wxRenderAir(payload) {
+  const aqi = (payload && payload.aqi) || {};
+  const pollen = (payload && payload.pollen) || {};
+
+  if (!aqi.available && !pollen.available) {
+    const why = payload && payload.errors && payload.errors.length
+      ? payload.errors[0]
+      : "Air quality and pollen unavailable.";
+    wxAir.innerHTML = `<h3>Air</h3><p class="wx-empty">${wxEscape(why)}</p>`;
+    return;
+  }
+
+  const aqiBlock = aqi.available
+    ? `<div class="wx-air-row">
+         <div class="wx-air-dial" style="--wx-dial:${wxColorFor(WX_AQI_COLORS, aqi.aqi)};--wx-dial-fg:${wxTextOn(wxColorFor(WX_AQI_COLORS, aqi.aqi))}">
+           <span class="wx-air-value">${aqi.aqi}</span>
+         </div>
+         <div class="wx-air-text">
+           <div class="wx-air-label">AQI · ${wxEscape(aqi.label || "")}</div>
+           <div class="wx-air-note">${wxEscape(aqi.note || "")}</div>
+           <div class="wx-air-parts">${
+             // Named because the reason matters: an Atlanta summer AQI is almost
+             // always ozone, and ozone is a reason to go out earlier, not to shut
+             // the windows.
+             [
+               aqi.ozone != null ? `ozone ${aqi.ozone}` : null,
+               aqi.pm2_5 != null ? `PM2.5 ${aqi.pm2_5}` : null,
+               aqi.pm10 != null ? `PM10 ${aqi.pm10}` : null,
+             ].filter(Boolean).map(wxEscape).join(" · ")
+           }</div>
+         </div>
+       </div>`
+    : `<p class="wx-empty">Air quality unavailable.</p>`;
+
+  const today = pollen.today || {};
+  const tomorrow = pollen.tomorrow || {};
+  const pollenBlock = pollen.available
+    ? `<div class="wx-air-row">
+         <div class="wx-air-dial" style="--wx-dial:${wxColorFor(WX_POLLEN_COLORS, today.index)};--wx-dial-fg:${wxTextOn(wxColorFor(WX_POLLEN_COLORS, today.index))}">
+           <span class="wx-air-value">${today.index}</span>
+           <span class="wx-air-scale">/${pollen.scale_max}</span>
+         </div>
+         <div class="wx-air-text">
+           <div class="wx-air-label">Pollen · ${wxEscape(today.label || "")}</div>
+           <div class="wx-air-note">${
+             today.triggers && today.triggers.length
+               ? wxEscape(today.triggers.join(", "))
+               : ""
+           }</div>
+           <div class="wx-air-parts">${
+             tomorrow.index != null
+               ? `Tomorrow ${tomorrow.index} · ${wxEscape(tomorrow.label || "")}`
+               : ""
+           }</div>
+         </div>
+       </div>`
+    : `<p class="wx-empty">Pollen unavailable.</p>`;
+
+  wxAir.innerHTML = `<h3>Air</h3>
+    <div class="wx-air-body">
+      ${aqiBlock}
+      ${pollenBlock}
+      <div class="wx-air-source">Air quality: Open-Meteo · Pollen: ${wxEscape(
+        pollen.source || "pollen.com"
+      )}${payload.stale ? " · showing the last reading" : ""}</div>
+    </div>`;
+}
+
+async function wxLoadAir() {
+  try {
+    const resp = await fetch("/api/weather/air");
+    wxRenderAir(resp.ok ? await resp.json() : null);
+  } catch (e) {
+    wxRenderAir(null);
+  }
+}
+
+/* ---------- radar ----------
+ * A single NWS RIDGE animated GIF: no map library, no tile server, no key, and it
+ * animates itself. 600x550, which is legible in a column but not much more, hence
+ * the full-screen view.
+ */
+
+let wxRadarInfo = null;
+let wxRadarView = "local";
+
+function wxRadarSrcFor(view) {
+  if (!wxRadarInfo) return null;
+  if (view === "regional") return wxRadarInfo.regional_url;
+  if (view === "national") return wxRadarInfo.national_url;
+  return wxRadarInfo.loop_url;
+}
+
+function wxRadarCaptionFor(view) {
+  if (!wxRadarInfo) return "";
+  if (view === "regional") return `${wxRadarInfo.region || "Regional"} — storms on the way`;
+  if (view === "national") return "Continental US";
+  return `${wxRadarInfo.station} — nearest radar`;
+}
+
+/** Builds a fresh <img> rather than setting .src on the existing one.
+ *  NWS serves these with a long cache life so the changing query string is what
+ *  actually fetches a new frame, and replacing the element avoids showing the old
+ *  loop while the new one downloads. */
+function wxRadarImage(view) {
+  const src = wxRadarSrcFor(view);
+  if (!src) return null;
+  const img = document.createElement("img");
+  img.className = "wx-radar-img";
+  img.alt = `Weather radar loop, ${view}`;
+  img.src = `${src}?t=${Date.now()}`;
+  return img;
+}
 
 async function wxLoadRadar() {
   try {
@@ -288,10 +516,15 @@ async function wxLoadRadar() {
       wxRadar.innerHTML = `<p class="wx-empty">${wxEscape(
         (data && data.reason) || "Radar unavailable."
       )}</p>`;
-      wxRadarUrl = null;
+      wxRadarInfo = null;
       return;
     }
-    wxRadarUrl = data.loop_url;
+    wxRadarInfo = data;
+    // A region this state isn't mapped to would render a 404 image, so the tab
+    // only appears when the server actually supplied a URL.
+    document
+      .querySelector('[data-wx-radar="regional"]')
+      .classList.toggle("hidden", !data.regional_url);
     wxRefreshRadar();
   } catch (e) {
     wxRadar.innerHTML = '<p class="wx-empty">Radar unavailable.</p>';
@@ -299,36 +532,62 @@ async function wxLoadRadar() {
 }
 
 function wxRefreshRadar() {
-  if (!wxRadarUrl) return;
-  // NWS serves this with a long cache life, so a changing query string is what
-  // actually gets a new frame. Rebuilding the <img> rather than setting .src
-  // avoids showing the old loop while the new one downloads.
-  const img = document.createElement("img");
-  img.className = "wx-radar-img";
-  img.alt = "Weather radar loop";
-  img.src = `${wxRadarUrl}?t=${Date.now()}`;
-  img.onerror = () => {
-    wxRadar.innerHTML = '<p class="wx-empty">Radar image didn\'t load.</p>';
-  };
-  wxRadar.replaceChildren(img);
+  const thumb = wxRadarImage("local");
+  if (thumb) {
+    thumb.onerror = () => {
+      wxRadar.innerHTML = '<p class="wx-empty">Radar image didn\'t load.</p>';
+    };
+    wxRadar.replaceChildren(thumb);
+  }
+  // Only redraw the big one while it's actually on screen; otherwise this would
+  // pull a 600KB GIF every four minutes for a hidden overlay.
+  if (!document.getElementById("wx-radar-overlay").classList.contains("hidden")) {
+    wxShowRadarView(wxRadarView);
+  }
 }
+
+function wxShowRadarView(view) {
+  wxRadarView = view;
+  document.querySelectorAll("[data-wx-radar]").forEach((tab) => {
+    tab.classList.toggle("wx-radar-tab--active", tab.dataset.wxRadar === view);
+  });
+  const img = wxRadarImage(view);
+  if (img) wxRadarBig.replaceChildren(img);
+  wxRadarCaption.textContent = wxRadarCaptionFor(view);
+}
+
+const wxRadarPanel = initPanel("wx-radar-overlay", "wx-radar-close");
+
+wxRadar.addEventListener("click", () => {
+  if (!wxRadarInfo) return;
+  wxShowRadarView(wxRadarView);
+  wxRadarPanel.open();
+});
+
+document.querySelectorAll("[data-wx-radar]").forEach((tab) => {
+  tab.addEventListener("click", () => wxShowRadarView(tab.dataset.wxRadar));
+});
 
 /* ---------- wiring ---------- */
 
 document.getElementById("wx-refresh").addEventListener("click", () => {
   wxLoadAlerts();
+  wxLoadAir();
   wxRefreshRadar();
   refreshWeather();
 });
 
 wxLoadAlerts();
+wxLoadAir();
 wxLoadRadar();
 setInterval(wxLoadAlerts, WX_ALERTS_MS);
+setInterval(wxLoadAir, WX_AIR_MS);
 setInterval(wxRefreshRadar, WX_RADAR_MS);
 
 // Collapse any opened alert when nobody's been here for a while, so the page is
 // back to its overview state next time someone walks up.
 onIdle(() => {
+  wxRadarPanel.close();
   wxAlerts.querySelectorAll("[data-wx-detail]").forEach((el) => el.classList.add("hidden"));
   wxAlerts.querySelectorAll("[data-wx-alert]").forEach((el) =>
     el.setAttribute("aria-expanded", "false")

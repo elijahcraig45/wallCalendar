@@ -305,6 +305,79 @@ def check_weather_hourly_is_anchored_to_now():
     check("a malformed hour timestamp is skipped, not fatal", isinstance(messy, list))
 
 
+
+def check_air_quality_and_pollen():
+    """AQI and pollen bands, and the rule that the two halves fail independently.
+
+    Pollen is the fragile one: it comes from an undocumented pollen.com endpoint
+    (Open-Meteo's pollen variables are null for US locations - CAMS Europe only,
+    verified against this wall's coordinates). It will break one day, and when it
+    does the air quality must survive it.
+    """
+    print("air quality and pollen")
+    from app import air_service
+
+    # US AQI breakpoints, at the edges rather than the middles.
+    for value, expected in [
+        (0, "Good"), (50, "Good"), (51, "Moderate"), (100, "Moderate"),
+        (101, "Unhealthy for sensitive groups"), (151, "Unhealthy"),
+        (201, "Very unhealthy"), (301, "Hazardous"),
+    ]:
+        label, _ = air_service.describe_aqi(value)
+        check(f"AQI {value} is {expected}", label == expected, f"got {label}")
+
+    # IQVIA's 0-12 scale.
+    for value, expected in [
+        (0, "Low"), (2.4, "Low"), (2.5, "Low-medium"), (4.9, "Medium"),
+        (7.2, "Medium"), (7.3, "Medium-high"), (9.7, "High"), (12, "High"),
+    ]:
+        check(f"pollen {value} is {expected}", air_service.describe_pollen(value) == expected,
+              f"got {air_service.describe_pollen(value)}")
+
+    check("a missing AQI has no band", air_service.describe_aqi(None) == (None, None))
+    check("a missing pollen index has no band", air_service.describe_pollen(None) is None)
+
+    # An AQI payload of nulls - which is what a location outside coverage returns -
+    # must report unavailable rather than rendering "None".
+    empty = air_service._parse_aqi({"current": {"us_aqi": None, "pm2_5": None}})
+    check("an empty AQI payload reports unavailable", empty["available"] is False)
+
+    # Pollen with no Today period, ditto.
+    no_today = air_service._parse_pollen(
+        {"Location": {"City": "ATLANTA", "periods": [{"Type": "Yesterday", "Index": 3.0}]}}
+    )
+    check("pollen with no Today reports unavailable", no_today["available"] is False)
+    check("pollen still names its source when unavailable", no_today["source"] == "pollen.com")
+
+
+def check_radar_regions_are_verified():
+    """Every RIDGE regional loop name in the map was probed against
+    radar.weather.gov and returned 200. The plausible-sounding ones that 404
+    (NORTHERNPLAINS, SOUTHWEST, NORTHWEST, CENTPLAINS) must stay out of it - an
+    unmapped state gets no regional tab, which is better than a broken image."""
+    print("radar regions")
+    from app.alerts_service import _REGION_LOOPS, _STATE_TO_REGION
+
+    verified = {
+        "SOUTHEAST", "NORTHEAST", "SOUTHMISSVLY", "UPPERMISSVLY", "CENTGRLAKES",
+        "SOUTHPLAINS", "SOUTHROCKIES", "NORTHROCKIES", "PACSOUTHWEST",
+        "PACNORTHWEST", "ALASKA", "HAWAII", "CARIB",
+    }
+    check(
+        "only verified region loop names are mapped",
+        set(_REGION_LOOPS) <= verified,
+        f"unverified: {set(_REGION_LOOPS) - verified}",
+    )
+    check("this wall's state maps to the southeast loop", _STATE_TO_REGION.get("GA") == "SOUTHEAST")
+    check("an unmapped state yields no region", _STATE_TO_REGION.get("ZZ") is None)
+
+    # No state may map to two regions, which a copy-paste slip in the table would
+    # do silently.
+    seen = [state for states in _REGION_LOOPS.values() for state in states]
+    check("no state is listed under two regions", len(seen) == len(set(seen)),
+          f"duplicates: {[x for x in set(seen) if seen.count(x) > 1]}")
+
+
 def main():
     os.environ.setdefault("FLASK_SECRET_KEY", "api-checks")
     for fn in (
@@ -316,6 +389,8 @@ def main():
         check_hidden_utility_is_unconditional,
         check_weather_alerts_parsing,
         check_weather_hourly_is_anchored_to_now,
+        check_air_quality_and_pollen,
+        check_radar_regions_are_verified,
     ):
         fn()
 
