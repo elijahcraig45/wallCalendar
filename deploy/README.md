@@ -43,6 +43,32 @@ hasn't already accounted for.
 | Kiosk browser | XDG autostart | `~/.config/autostart/wall-calendar-kiosk.desktop` |
 | UxPlay | XDG autostart | `~/.config/autostart/uxplay.desktop` |
 
+## Spotify Connect (separate, optional)
+
+`bash deploy/librespot-setup.sh` — installs raspotify (packaged librespot) and
+enables it, making the Pi a Spotify Connect speaker. Not part of `setup-pi.sh`:
+it's an independent decision about how music reaches the room, and the calendar
+works without it.
+
+```bash
+bash deploy/librespot-setup.sh                        # "Wall Calendar", 320kbps, default ALSA out
+bash deploy/librespot-setup.sh --name "Kitchen"       # rename the Connect target
+bash deploy/librespot-setup.sh --device hw:1,0        # a USB DAC or audio HAT
+```
+
+Why bother when the app has its own player: the in-browser Web Playback SDK
+needs Widevine DRM plus Premium *on the display*, and the Spotify app backing
+this project is stuck in Development Mode — 25 hand-added users, 10-result
+search, no radio. A Connect target has none of those limits and no UI to
+maintain. The two coexist; the Pi just appears in the wall's device picker as
+another speaker.
+
+The Widevine concern is not hypothetical: driving the Music page under headless
+Chromium fails with `No supported keysystem was found`, which is exactly what a
+Chromium build without Widevine reports. If the SDK never registers a device,
+the device picker now says so and points here rather than silently offering a
+display that can't play anything.
+
 The auto-rebuild service runs as your normal user (so pulled files/venv
 stay user-owned, not root-owned) but needs to restart a root-owned
 systemd service - `setup-pi.sh` grants exactly that one command via
@@ -70,6 +96,9 @@ journalctl -u wallcalendar-autorebuild.service -n 20  # last rebuild check
   rather than auto-edited - it's a shell script, not a list of discrete
   entries, so editing it programmatically risks breaking it. Review
   `~/autostart-backup-*/rc.local.bak` and edit it by hand if needed.
-- This has not been run against real hardware - review the printed plan
-  in Step 8 before confirming the autostart cleanup, especially on a Pi
-  that already has a working kiosk setup you don't want to lose.
+- **Neither `setup-pi.sh` nor `librespot-setup.sh` has ever run against real
+  hardware.** Review the printed plan in `setup-pi.sh` Step 8 before confirming
+  the autostart cleanup, especially on a Pi that already has a working kiosk
+  setup you don't want to lose. `librespot-setup.sh` pipes the upstream raspotify
+  installer to `sh` (as upstream documents) and rewrites `/etc/raspotify/conf`,
+  keeping a `.orig` copy — read it before running it.

@@ -1,8 +1,11 @@
 {% extends "base.html" %}
 
 {% block topbar %}
-<h1>Spotify</h1>
+<h1>Music</h1>
 <div class="topbar-actions">
+  <button id="queue-toggle" aria-label="Queue">
+    <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 10h12v2H4v-2zm0-4h12v2H4V6zm0 8h8v2H4v-2zm14-1v6l5-3-5-3z"/></svg>
+  </button>
   <button id="device-toggle" aria-label="Devices">
     <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
   </button>
@@ -10,141 +13,137 @@
 {% endblock %}
 
 {% block content %}
-<div id="spotify-home">
-  <div id="home-search-row">
-    <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 5L20.49 19l-5-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
-    <input id="search-input" type="text" placeholder="Search songs, artists..." inputmode="search">
-  </div>
+{# Two panes rather than the phone shape this started as (a mini-player that
+   expanded to a full-screen overlay, plus four bottom sheets). On a landscape
+   wall the now-playing state is worth permanent screen space, and the detail
+   views have room to open beside it instead of on top of it. #}
+<div id="spotify-layout">
 
-  <div id="home-scroll">
-    <div id="search-results" class="hidden"></div>
+  <section id="nowplaying-pane">
+    <div id="backdrop-blur"></div>
+    <div id="nowplaying-inner">
+      <img id="album-art" src="" alt="" class="hidden">
+      <h1 id="track-title">Nothing playing</h1>
+      <h2 id="track-artist"></h2>
 
-    <div id="home-default-content">
-      <section class="tile-section">
-        <h3>Jump Back In</h3>
-        <div id="quick-access-grid" class="quick-grid"></div>
-      </section>
-      <section class="tile-section">
-        <h3>Your Playlists</h3>
-        <div id="playlists-strip" class="tile-strip"></div>
-      </section>
-    </div>
-  </div>
-
-  <div id="mini-player" class="hidden">
-    <img id="mini-art" src="" alt="">
-    <div id="mini-text">
-      <div id="mini-title"></div>
-      <div id="mini-artist"></div>
-    </div>
-    <button id="mini-play-pause" aria-label="Play/Pause">
-      <svg id="mini-icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-      <svg id="mini-icon-pause" viewBox="0 0 24 24" class="hidden"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
-    </button>
-  </div>
-</div>
-
-<div id="nowplaying-overlay" class="hidden">
-  <div id="backdrop-blur"></div>
-
-  <div id="nowplaying-header">
-    <button id="nowplaying-collapse" aria-label="Collapse">&#9660;</button>
-    <button id="queue-toggle" aria-label="Queue">
-      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 10h12v2H4v-2zm0-4h12v2H4V6zm0 8h8v2H4v-2zm14-1v6l5-3-5-3z"/></svg>
-    </button>
-  </div>
-
-  <div id="spotify-main">
-    <img id="album-art" src="" alt="" class="hidden">
-    <h1 id="track-title">Nothing playing</h1>
-    <h2 id="track-artist"></h2>
-
-    <div id="progress-container">
-      <div id="progress-bar"><div id="progress-fill"></div></div>
-      <div id="progress-times">
-        <span id="time-elapsed">0:00</span>
-        <span id="time-duration">0:00</span>
-      </div>
-    </div>
-
-    <div id="transport-controls">
-      <button id="btn-shuffle" class="transport-btn transport-btn-small" aria-label="Shuffle">
-        <svg viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.42 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
-      </button>
-      <button id="btn-previous" class="transport-btn" aria-label="Previous">
-        <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
-      </button>
-      <button id="btn-play-pause" class="transport-btn transport-btn-main" aria-label="Play/Pause">
-        <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-        <svg id="icon-pause" viewBox="0 0 24 24" class="hidden"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
-      </button>
-      <button id="btn-next" class="transport-btn" aria-label="Next">
-        <svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 6l8.5 6L6 18z"/></svg>
-      </button>
-      <button id="btn-repeat" class="transport-btn transport-btn-small" aria-label="Repeat">
-        <svg id="icon-repeat-all" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v5z"/></svg>
-        <svg id="icon-repeat-one" viewBox="0 0 24 24" class="hidden"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v5zm-4.5-6.5v-3l-1.5.9v1.1h1v3.5h1.5v-2.5h-1z"/></svg>
-      </button>
-    </div>
-
-    <div id="volume-row">
-      <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
-      <input id="volume-slider" type="range" min="0" max="100" value="50">
-    </div>
-  </div>
-</div>
-
-<div id="device-overlay" class="sheet-overlay hidden">
-  <div id="device-panel" class="sheet-panel">
-    <div id="device-panel-header">
-      <h2>Play on</h2>
-      <button id="device-close" aria-label="Close">&times;</button>
-    </div>
-    <ul id="device-list"></ul>
-  </div>
-</div>
-
-<div id="playlist-overlay" class="sheet-overlay hidden">
-  <div id="playlist-panel" class="sheet-panel">
-    <div id="playlist-panel-header">
-      <img id="playlist-image" src="" alt="">
-      <div id="playlist-header-text">
-        <h2 id="playlist-name"></h2>
-        <div id="playlist-actions">
-          <button id="playlist-play-btn">Play</button>
-          <button id="playlist-shuffle-btn">Shuffle</button>
+      <div id="progress-container">
+        <div id="progress-bar"><div id="progress-fill"></div></div>
+        <div id="progress-times">
+          <span id="time-elapsed">0:00</span>
+          <span id="time-duration">0:00</span>
         </div>
       </div>
-      <button id="playlist-close" aria-label="Close">&times;</button>
-    </div>
-    <ul id="playlist-tracks"></ul>
-  </div>
-</div>
 
-<div id="artist-overlay" class="sheet-overlay hidden">
-  <div id="artist-panel" class="sheet-panel">
-    <div id="artist-panel-header">
-      <img id="artist-image" src="" alt="">
-      <h2 id="artist-name"></h2>
-      <button id="artist-close" aria-label="Close">&times;</button>
-    </div>
-    <ul id="artist-albums"></ul>
-  </div>
-</div>
+      <div id="transport-controls">
+        <button id="btn-shuffle" class="transport-btn transport-btn-small" aria-label="Shuffle">
+          <svg viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.42 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
+        </button>
+        <button id="btn-previous" class="transport-btn" aria-label="Previous">
+          <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button id="btn-play-pause" class="transport-btn transport-btn-main" aria-label="Play/Pause">
+          <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+          <svg id="icon-pause" viewBox="0 0 24 24" class="hidden"><path d="M6 5h4v14H6zm8 0h4v14h-4z"/></svg>
+        </button>
+        <button id="btn-next" class="transport-btn" aria-label="Next">
+          <svg viewBox="0 0 24 24"><path d="M16 6h2v12h-2zM6 6l8.5 6L6 18z"/></svg>
+        </button>
+        <button id="btn-repeat" class="transport-btn transport-btn-small" aria-label="Repeat">
+          <svg id="icon-repeat-all" viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v5z"/></svg>
+          <svg id="icon-repeat-one" viewBox="0 0 24 24" class="hidden"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v5zm-4.5-6.5v-3l-1.5.9v1.1h1v3.5h1.5v-2.5h-1z"/></svg>
+        </button>
+      </div>
 
-<div id="queue-overlay" class="sheet-overlay hidden">
-  <div id="queue-panel" class="sheet-panel">
-    <div class="sheet-header">
-      <h2>Up Next</h2>
-      <button id="queue-close" class="sheet-close" aria-label="Close">&times;</button>
+      <div id="volume-row">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+        <input id="volume-slider" type="range" min="0" max="100" value="50">
+      </div>
+
+      <button id="device-current" class="pill-button">
+        <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+        <span id="device-current-name">No device</span>
+      </button>
     </div>
-    <ul id="queue-tracks" class="sheet-body"></ul>
-  </div>
+  </section>
+
+  <section id="browse-pane">
+    <div id="browse-header">
+      <button id="browse-back" class="pill-button hidden">&#8249;&nbsp; Back</button>
+      <div id="home-search-row">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 5L20.49 19l-5-5zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z"/></svg>
+        <input id="search-input" type="text" placeholder="Search songs, artists, albums..." inputmode="search">
+      </div>
+    </div>
+
+    {# One of these .browse-view sections is visible at a time. The IDs match
+       what the old bottom sheets used, so the fetch/render logic driving them is
+       unchanged - only initPanel became initPane. #}
+    <div id="browse-body">
+      <div id="browse-home" class="browse-view">
+        <div id="search-results" class="hidden"></div>
+        <div id="home-default-content">
+          <section class="tile-section">
+            <h3>Jump Back In</h3>
+            <div id="quick-access-grid" class="quick-grid"></div>
+          </section>
+          <section class="tile-section">
+            <h3>Your Playlists</h3>
+            <div id="playlists-strip" class="tile-grid"></div>
+          </section>
+        </div>
+      </div>
+
+      <div id="playlist-overlay" class="browse-view hidden">
+        <div id="playlist-panel-header">
+          <img id="playlist-image" src="" alt="">
+          <div id="playlist-header-text">
+            <h2 id="playlist-name"></h2>
+            <div id="playlist-actions">
+              <button id="playlist-play-btn">Play</button>
+              <button id="playlist-shuffle-btn">Shuffle</button>
+            </div>
+          </div>
+          <button id="playlist-close" class="sheet-close" aria-label="Close">&times;</button>
+        </div>
+        <ul id="playlist-tracks"></ul>
+      </div>
+
+      <div id="artist-overlay" class="browse-view hidden">
+        <div id="artist-panel-header">
+          <img id="artist-image" src="" alt="">
+          <h2 id="artist-name"></h2>
+          <button id="artist-close" class="sheet-close" aria-label="Close">&times;</button>
+        </div>
+        <ul id="artist-albums"></ul>
+      </div>
+
+      <div id="queue-overlay" class="browse-view hidden">
+        <div class="sheet-header">
+          <h2>Up Next</h2>
+          <button id="queue-close" class="sheet-close" aria-label="Close">&times;</button>
+        </div>
+        <ul id="queue-tracks"></ul>
+      </div>
+
+      <div id="device-overlay" class="browse-view hidden">
+        <div id="device-panel-header">
+          <h2>Play on</h2>
+          <button id="device-close" class="sheet-close" aria-label="Close">&times;</button>
+        </div>
+        <ul id="device-list"></ul>
+      </div>
+    </div>
+  </section>
 </div>
 {% endblock %}
 
 {% block scripts %}
+{# No panel.js here: the detail views are panes in the browse column now, driven
+   by spotify.js's own initPane, not the shared modal/sheet helper. #}
+{% if not demo_mode %}
+{# Skipped in demo mode: there's no real Spotify session for it to authenticate
+   with, so all it does is fill the console with 401s and DRM failures. #}
 <script src="https://sdk.scdn.co/spotify-player.js"></script>
-<script src="/static/panel.js"></script>
+{% endif %}
 <script src="/static/spotify.js"></script>
 {% endblock %}

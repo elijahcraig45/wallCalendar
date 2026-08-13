@@ -1,21 +1,38 @@
 import requests
 
 from app.auth import spotify_auth
+from app.config import DEMO_MODE
 
 PLAYLIST_ITEMS_URL = "https://api.spotify.com/v1/playlists/{playlist_id}/items"
+
+
+class SpotifyForbidden(RuntimeError):
+    """Spotify refused a request that this app is simply not allowed to make -
+    a Development Mode restriction rather than anything wrong locally, so it
+    needs to reach the user as an explanation, not a 500."""
+
+
+class SpotifyNotConfigured(RuntimeError):
+    """No Spotify account is signed in. Its own type (rather than a bare
+    ValueError) so server.py can answer it with a clear status instead of an
+    HTML 500 page."""
 
 
 def _client():
     accounts = spotify_auth.signed_in_accounts()
     if not accounts:
-        raise ValueError("No Spotify account signed in. Run `python cli.py spotify`.")
+        raise SpotifyNotConfigured(
+            "No Spotify account signed in. Run `python cli.py spotify`."
+        )
     return spotify_auth.get_client(accounts[0])
 
 
 def get_access_token() -> str:
     accounts = spotify_auth.signed_in_accounts()
     if not accounts:
-        raise ValueError("No Spotify account signed in. Run `python cli.py spotify`.")
+        raise SpotifyNotConfigured(
+            "No Spotify account signed in. Run `python cli.py spotify`."
+        )
     return spotify_auth.get_access_token(accounts[0])
 
 
@@ -39,6 +56,14 @@ def _track_summary(track: dict) -> dict:
 
 
 def now_playing() -> dict | None:
+    # "Nothing is playing" is the honest answer when no account is signed in, and
+    # it's already a state every caller renders. This matters more than it looks:
+    # the shell polls this endpoint from *every* page every few seconds, so
+    # raising here filled the service log with tracebacks on any install where
+    # Google was set up but Spotify wasn't - which is the default after setup.
+    if not spotify_auth.signed_in_accounts():
+        return None
+
     playback = _client().current_playback()
     if playback is None or playback.get("item") is None:
         return None
@@ -58,6 +83,10 @@ def now_playing() -> dict | None:
         "repeat_state": playback.get("repeat_state", "off"),
         "volume_percent": device.get("volume_percent"),
         "supports_volume": device.get("supports_volume", True),
+        # Surfaced so the wall can say *where* it's playing without a second
+        # round trip to /devices - on a shared speaker that's the first thing
+        # someone walking up wants to know.
+        "device_name": device.get("name"),
         "context_uri": context.get("uri"),
     }
 
@@ -162,6 +191,17 @@ def playlist_tracks(playlist_id: str, limit: int = 100) -> list[dict]:
     tracks = []
     while url and len(tracks) < limit:
         resp = requests.get(url, headers=headers, params=params)
+        # Observed against a real account: /items succeeds for playlists the
+        # signed-in user owns but 403s for some owned by other people, while the
+        # deprecated /tracks path 403s for all of them. Spotify's exact rule
+        # isn't discoverable from outside, and there's no fallback left to try -
+        # so this surfaces as an explanation rather than an unhandled 500.
+        if resp.status_code == 403:
+            raise SpotifyForbidden(
+                "Spotify won't let this app read that playlist. That's a "
+                "Development Mode restriction, not a problem with the wall - "
+                "playlists you own yourself do work."
+            )
         resp.raise_for_status()
         data = resp.json()
         for entry in data.get("items", []):
@@ -237,8 +277,11 @@ def recently_played(limit: int = 12) -> list[dict]:
     return tracks
 
 
-def playlists(limit: int = 12) -> list[dict]:
-    results = _client().current_user_playlists(limit=limit)
+def playlists(limit: int = 50) -> list[dict]:
+    # 50 is the endpoint's per-page maximum. The old limit of 12 was sized for a
+    # single horizontal strip on a phone; the landscape browse grid shows far
+    # more than that at once.
+    results = _client().current_user_playlists(limit=min(limit, 50))
     out = []
     for p in results["items"]:
         images = p.get("images", [])
@@ -250,3 +293,23 @@ def playlists(limit: int = 12) -> list[dict]:
             }
         )
     return out
+
+
+if DEMO_MODE:
+    from app import demo_spotify
+
+    # Demo mode replaces this module's public surface wholesale, so server.py's
+    # routes are untouched and there's no `if DEMO_MODE` threaded through 24
+    # functions. The names are listed explicitly rather than swept from dir():
+    # a function present here but missing from demo_spotify raises immediately
+    # on import, instead of a demo run quietly reaching the live Spotify API.
+    for _name in (
+        "get_access_token", "devices", "transfer_playback", "now_playing",
+        "play", "pause", "next_track", "previous_track", "seek", "set_volume",
+        "set_shuffle", "set_repeat", "queue", "liked_songs", "album_tracks",
+        "play_uri", "play_uris", "play_context", "play_context_at",
+        "playlist_tracks", "artist_albums", "search", "recently_played",
+        "playlists",
+    ):
+        globals()[_name] = getattr(demo_spotify, _name)
+    del _name

@@ -17,15 +17,7 @@ const timeDuration = document.getElementById("time-duration");
 const volumeRow = document.getElementById("volume-row");
 const volumeSlider = document.getElementById("volume-slider");
 
-const miniPlayer = document.getElementById("mini-player");
-const miniArt = document.getElementById("mini-art");
-const miniTitle = document.getElementById("mini-title");
-const miniArtist = document.getElementById("mini-artist");
-const miniPlayPauseBtn = document.getElementById("mini-play-pause");
-const miniIconPlay = document.getElementById("mini-icon-play");
-const miniIconPause = document.getElementById("mini-icon-pause");
-
-const nowPlayingOverlay = document.getElementById("nowplaying-overlay");
+const deviceCurrentName = document.getElementById("device-current-name");
 
 let state = { progressMs: 0, durationMs: 0, isPlaying: false, lastUpdate: Date.now() };
 
@@ -61,10 +53,9 @@ function updateRepeatButton(repeatState) {
   iconRepeatAll.classList.toggle("hidden", repeatState === "track");
 }
 
-async function refreshNowPlaying() {
-  const resp = await fetch("/api/spotify/now-playing");
-  const data = await resp.json();
-
+/* Driven by the shell's shared poller (see nav.js), not its own fetch loop -
+   the rail chip and this pane render the same payload. */
+function renderNowPlaying(data) {
   if (!data) {
     trackTitle.textContent = "Nothing playing";
     trackArtist.textContent = "";
@@ -76,10 +67,12 @@ async function refreshNowPlaying() {
     shuffleBtn.classList.remove("active");
     updateRepeatButton("off");
     volumeRow.classList.add("hidden");
+    deviceCurrentName.textContent = "Pick a speaker";
     renderProgress();
-    miniPlayer.classList.add("hidden");
     return;
   }
+
+  deviceCurrentName.textContent = data.device_name || "Pick a speaker";
 
   trackTitle.textContent = data.track;
   trackArtist.textContent = data.artist;
@@ -121,15 +114,9 @@ async function refreshNowPlaying() {
   }
 
   renderProgress();
-
-  // ---- mini-player ----
-  miniPlayer.classList.remove("hidden");
-  miniTitle.textContent = data.track;
-  miniArtist.textContent = data.artist;
-  miniArt.src = data.album_art || "";
-  miniIconPlay.classList.toggle("hidden", state.isPlaying);
-  miniIconPause.classList.toggle("hidden", !state.isPlaying);
 }
+
+onNowPlaying(renderNowPlaying);
 
 async function post(path, body) {
   const resp = await fetch(path, {
@@ -227,7 +214,7 @@ volumeSlider.addEventListener("change", () => {
 
 // ---------- queue ----------
 
-const queuePanel = initPanel("queue-overlay", "queue-close");
+const queuePanel = initPane("queue-overlay", "queue-close");
 const queueTracksEl = document.getElementById("queue-tracks");
 
 document.getElementById("queue-toggle").addEventListener("click", async () => {
@@ -240,7 +227,10 @@ document.getElementById("queue-toggle").addEventListener("click", async () => {
   queueTracksEl.innerHTML = "";
   if (data.current) {
     const li = document.createElement("li");
-    li.className = "playlist-loading";
+    // Its own class, not a borrowed `playlist-loading`: reusing the loading
+    // style for a permanent row meant "is this list still loading?" had no
+    // reliable answer, for a reader or a test.
+    li.className = "queue-current";
     li.textContent = `Now playing: ${data.current.name}`;
     queueTracksEl.appendChild(li);
   }
@@ -255,24 +245,47 @@ document.getElementById("queue-toggle").addEventListener("click", async () => {
   }
 });
 
-refreshNowPlaying();
-setInterval(refreshNowPlaying, 5000);
+// The now-playing pane is always on screen, so there's no mini-player to expand
+// and nothing to collapse - the shell's rail chip covers the other pages.
 setInterval(renderProgress, 500);
 
-// ---------- mini-player <-> full-screen expand/collapse ----------
+/* ---------- browse pane navigation ----------
+   Detail views open beside the now-playing pane instead of as bottom sheets over
+   it. initPane keeps initPanel's {open, close} shape, so every call site that
+   used to drive a sheet drives a pane view unchanged - and a small stack means
+   Back walks artist -> album -> home rather than always dumping you home. */
 
-miniPlayPauseBtn.addEventListener("click", (e) => {
-  e.stopPropagation();
-  post(state.isPlaying ? "/api/spotify/pause" : "/api/spotify/play");
-});
+const browseBack = document.getElementById("browse-back");
+const browseViews = [...document.querySelectorAll(".browse-view")];
 
-miniPlayer.addEventListener("click", () => {
-  nowPlayingOverlay.classList.remove("hidden");
-});
+const HOME_VIEW = "browse-home";
+let activeView = HOME_VIEW;
+const viewStack = [];
 
-document.getElementById("nowplaying-collapse").addEventListener("click", () => {
-  nowPlayingOverlay.classList.add("hidden");
-});
+function showView(id) {
+  activeView = id;
+  browseViews.forEach((view) => view.classList.toggle("hidden", view.id !== id));
+  browseBack.classList.toggle("hidden", id === HOME_VIEW);
+  document.getElementById("browse-body").scrollTop = 0;
+}
+
+function initPane(viewId, closeId) {
+  const pane = {
+    open() {
+      if (activeView !== viewId) viewStack.push(activeView);
+      showView(viewId);
+    },
+    close() {
+      showView(viewStack.pop() || HOME_VIEW);
+    },
+  };
+  // Same responsibility initPanel had: the view's own close button dismisses it.
+  const closeBtn = document.getElementById(closeId);
+  if (closeBtn) closeBtn.addEventListener("click", pane.close);
+  return pane;
+}
+
+browseBack.addEventListener("click", () => showView(viewStack.pop() || HOME_VIEW));
 
 // ---------- browse tiles ----------
 
@@ -350,7 +363,7 @@ function openLikedSongsDetail() {
     title: "Liked Songs",
     image: LIKED_SONGS_ICON,
     fetchTracks: async () => {
-      cachedTracks = await fetch("/api/spotify/liked-songs").then((r) => r.json());
+      cachedTracks = await fetchJson("/api/spotify/liked-songs");
       return cachedTracks;
     },
     onPlayAll: () => post("/api/spotify/play-uris", { uris: cachedTracks.map((t) => t.uri) }),
@@ -389,6 +402,12 @@ searchInput.addEventListener("input", () => {
   clearTimeout(searchDebounce);
   const query = searchInput.value.trim();
 
+  // The search field is in the pane's persistent header, so it can be typed into
+  // while a playlist/artist/queue view is open - and results render inside the
+  // home view. Without this, typing appeared to do nothing at all.
+  viewStack.length = 0;
+  showView(HOME_VIEW);
+
   if (!query) {
     searchResults.classList.add("hidden");
     homeDefaultContent.classList.remove("hidden");
@@ -405,12 +424,12 @@ searchInput.addEventListener("input", () => {
     searchResults.innerHTML = "";
 
     if (data.artists.length > 0) {
-      const strip = addSearchGroup("Artists", "tile-strip");
+      const strip = addSearchGroup("Artists", "tile-grid");
       renderTiles(strip, data.artists, (item) => openArtistDetail(item), "artist-tile");
     }
 
     if (data.albums.length > 0) {
-      const strip = addSearchGroup("Albums", "tile-strip");
+      const strip = addSearchGroup("Albums", "tile-grid");
       renderTiles(strip, data.albums, (item) => openAlbumDetail(item));
     }
 
@@ -469,6 +488,16 @@ function addSearchGroup(title, contentClass, isList) {
 // through the Pi's onboard speakers by default.
 
 let sdkDeviceId = null;
+// Set when this display has failed to become a playback target at all. The
+// reasons are varied and not reliably reported (missing Widevine surfaces as an
+// uncaught "No supported keysystem was found", a free account as account_error,
+// no SDK script at all as nothing happening), so rather than trying to classify
+// the failure this just notices that no device id ever arrived.
+let sdkUnavailable = false;
+
+setTimeout(() => {
+  if (!sdkDeviceId) sdkUnavailable = true;
+}, 8000);
 
 window.onSpotifyWebPlaybackSDKReady = () => {
   const player = new Spotify.Player({
@@ -501,7 +530,7 @@ window.onSpotifyWebPlaybackSDKReady = () => {
 // ---------- device picker ----------
 
 const deviceToggle = document.getElementById("device-toggle");
-const devicePanel = initPanel("device-overlay", "device-close");
+const devicePanel = initPane("device-overlay", "device-close");
 const deviceList = document.getElementById("device-list");
 
 const SPEAKER_ICON =
@@ -511,6 +540,18 @@ async function loadDevices() {
   const resp = await fetch("/api/spotify/devices");
   const devices = await resp.json();
   deviceList.innerHTML = "";
+
+  // Say so plainly rather than leaving someone tapping a display that silently
+  // isn't a speaker. Playing through the browser needs DRM support and a Premium
+  // account; a Spotify Connect target on the Pi needs neither.
+  if (sdkUnavailable) {
+    const note = document.createElement("li");
+    note.className = "device-note";
+    note.textContent =
+      "This display can't play audio itself. Pick another speaker below, " +
+      "or set up Spotify Connect on the Pi (see deploy/librespot-setup.sh).";
+    deviceList.appendChild(note);
+  }
 
   if (devices.length === 0) {
     const li = document.createElement("li");
@@ -543,9 +584,11 @@ async function loadDevices() {
   });
 }
 
-deviceToggle.addEventListener("click", () => {
-  devicePanel.open();
-  loadDevices();
+[deviceToggle, document.getElementById("device-current")].forEach((el) => {
+  el.addEventListener("click", () => {
+    devicePanel.open();
+    loadDevices();
+  });
 });
 
 // ---------- track list overlay (playlists, albums, Liked Songs) ----------
@@ -554,7 +597,7 @@ deviceToggle.addEventListener("click", () => {
 // albums, uris-based play for Liked Songs, which has no context_uri) but
 // the markup/lifecycle is identical.
 
-const trackListPanel = initPanel("playlist-overlay", "playlist-close");
+const trackListPanel = initPane("playlist-overlay", "playlist-close");
 const playlistImage = document.getElementById("playlist-image");
 const playlistName = document.getElementById("playlist-name");
 const playlistTracksEl = document.getElementById("playlist-tracks");
@@ -587,6 +630,25 @@ function renderTrackRow(t, onTap) {
   return li;
 }
 
+/* Fetches JSON and turns a non-OK response into a thrown Error carrying the
+   server's own message. Without this, an error response (Spotify forbids reading
+   some playlists entirely) reached .json() as an HTML page and surfaced as
+   "Unexpected token '<'" with the view stuck on "Loading..." forever. */
+async function fetchJson(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) {
+    let message = `Request failed (${resp.status})`;
+    try {
+      const data = await resp.json();
+      if (data.error) message = data.error;
+    } catch (e) {
+      // not JSON - keep the status-based message
+    }
+    throw new Error(message);
+  }
+  return resp.json();
+}
+
 async function openTrackListOverlay({ title, image, fetchTracks, onPlayAll, onShuffle, onTrackTap }) {
   playlistImage.src = image || "";
   playlistName.textContent = title;
@@ -594,7 +656,18 @@ async function openTrackListOverlay({ title, image, fetchTracks, onPlayAll, onSh
   currentTrackListActions = { onPlayAll, onShuffle };
   trackListPanel.open();
 
-  const tracks = await fetchTracks();
+  let tracks;
+  try {
+    tracks = await fetchTracks();
+  } catch (err) {
+    playlistTracksEl.innerHTML = "";
+    const li = document.createElement("li");
+    li.className = "track-list-error";
+    li.textContent = err.message;
+    playlistTracksEl.appendChild(li);
+    showToast(err.message);
+    return;
+  }
 
   playlistTracksEl.innerHTML = "";
   tracks.forEach((t) => {
@@ -615,7 +688,7 @@ function openPlaylistDetail(item) {
   openTrackListOverlay({
     title: item.name,
     image: item.image,
-    fetchTracks: () => fetch(`/api/spotify/playlist/${playlistId}/tracks`).then((r) => r.json()),
+    fetchTracks: () => fetchJson(`/api/spotify/playlist/${playlistId}/tracks`),
     onPlayAll: () => post("/api/spotify/play-context", { uri: item.uri }),
     onShuffle: async () => {
       await post("/api/spotify/shuffle", { state: true });
@@ -630,7 +703,7 @@ function openAlbumDetail(item) {
   openTrackListOverlay({
     title: item.name,
     image: item.image,
-    fetchTracks: () => fetch(`/api/spotify/album/${albumId}/tracks`).then((r) => r.json()),
+    fetchTracks: () => fetchJson(`/api/spotify/album/${albumId}/tracks`),
     onPlayAll: () => post("/api/spotify/play-context", { uri: item.uri }),
     onShuffle: async () => {
       await post("/api/spotify/shuffle", { state: true });
@@ -655,7 +728,7 @@ playlistShuffleBtn.addEventListener("click", () => {
 // for apps without extended quota access. This shows the artist's actual
 // discography instead; tap an album to open its track list.
 
-const artistPanel = initPanel("artist-overlay", "artist-close");
+const artistPanel = initPane("artist-overlay", "artist-close");
 const artistImage = document.getElementById("artist-image");
 const artistName = document.getElementById("artist-name");
 const artistAlbumsEl = document.getElementById("artist-albums");
@@ -686,10 +759,9 @@ async function openArtistDetail(item) {
     text.appendChild(title);
     li.appendChild(text);
 
-    li.addEventListener("click", () => {
-      artistPanel.close();
-      openAlbumDetail(a);
-    });
+    // Deliberately not closing the artist view first: leaving it on the stack is
+    // what makes Back walk album -> artist -> home.
+    li.addEventListener("click", () => openAlbumDetail(a));
 
     artistAlbumsEl.appendChild(li);
   });
