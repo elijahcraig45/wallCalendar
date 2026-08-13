@@ -128,6 +128,17 @@ The screen dims after dark and any touch wakes it for a few minutes. The schedul
 follows real sunset/sunrise from the weather rather than a fixed hour, falling back
 to 22:00–06:00 when weather is unavailable.
 
+Dimming is a dark overlay drawn over the page, not a backlight change, so the panel
+still emits light — it just isn't showing a bright calendar. **This can't be
+improved on the current monitor:** the ViewSonic TD2230 does not support DDC/CI
+(probed with `ddcutil detect`; I2C slave address 0x37 is unresponsive), so there is
+no way to set brightness from the Pi. Recorded here so it doesn't get investigated
+twice — a different panel with DDC/CI support would allow real dimming.
+
+A severe-weather warning overrides dimming: an urgent NWS alert wakes the screen and
+draws a banner above the overlay. Only on arrival, though, never on every poll —
+otherwise any active advisory would keep the wall lit all night.
+
 ### Event colours come from Google
 
 An event takes its own `colorId` if it has one, otherwise its **calendar's** colour
@@ -258,6 +269,24 @@ Layout notes worth knowing before changing them:
    ID only - PKCE means no secret is needed).
 4. While the app is in Development Mode, add every account that needs access
    under Users and Access (max 25).
+
+**The wall is also a Spotify Connect target** — `bash deploy/librespot-setup.sh`,
+which is installed and running on the Pi. Cast to "Wall Calendar" from any phone
+on the network, with any Premium account, and none of the Development Mode limits
+apply. Playback also survives a page reload, which the in-browser player does not —
+and since a deploy reloads the wall, that matters.
+
+Two things about that setup worth knowing before changing it:
+
+- It runs as a **user** systemd service (`systemctl --user status librespot`), not
+  raspotify's packaged system service, which is masked. PipeWire lives in the
+  logged-in user's session, and a system unit can't reach that socket — it would be
+  silent, or with the ALSA backend would take exclusive hold of the HDMI device and
+  fight Chromium for it.
+- A **Pi 5 has no 3.5mm jack**, so HDMI is the only output, and that works only
+  because the TD2230 accepts audio over it (`/proc/asound/card0/eld#0` reports
+  `speakers [0x1] FL/FR`). Swap in a monitor without speakers and you need a USB
+  DAC or a Bluetooth speaker before any of this makes a sound.
 
 ### Local environment
 

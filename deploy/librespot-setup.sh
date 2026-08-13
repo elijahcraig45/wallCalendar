@@ -6,38 +6,37 @@
 # Playback SDK needs Widevine DRM plus a Premium account, and the Spotify app
 # backing this project is in Development Mode - capped at 25 hand-added users,
 # with search limited to 10 results and no radio/recommendations at all. A
-# Connect target has none of those limits, needs no browser DRM, and there's no
-# playback UI left to maintain. The wall's own device picker still works; the Pi
-# simply shows up in it as another speaker.
+# Connect target has none of those limits, needs no browser DRM, and playback
+# survives a page reload - which matters here, because the wall reloads itself
+# whenever a deploy lands.
 #
-# !!! NEVER RUN AGAINST REAL HARDWARE !!!
-# This script has not been executed on a Pi. Same status as setup-pi.sh. Read it
-# before running it, and expect to adjust the audio device for your setup.
+# Run on real hardware (Pi 5, Raspberry Pi OS Trixie) and verified there.
 #
 # Idempotent - safe to re-run.
 #
 # Usage:
 #   bash deploy/librespot-setup.sh                       # defaults below
 #   bash deploy/librespot-setup.sh --name "Kitchen"      # Connect device name
-#   bash deploy/librespot-setup.sh --bitrate 320         # 96 | 160 | 320
-#   bash deploy/librespot-setup.sh --device hw:1,0       # specific ALSA device
+#   bash deploy/librespot-setup.sh --bitrate 160         # 96 | 160 | 320
+#   bash deploy/librespot-setup.sh --backend alsa        # if you have no PipeWire
 
 set -euo pipefail
 
 if [ "$(id -u)" = "0" ]; then
-  echo "Run this as your normal user, not root/sudo - it calls sudo itself where needed." >&2
+  echo "Run this as your normal user, not root/sudo - it calls sudo itself where needed," >&2
+  echo "and the service it installs is a USER service that has to belong to you." >&2
   exit 1
 fi
 
 DEVICE_NAME="Wall Calendar"
 BITRATE="320"
-ALSA_DEVICE=""
+BACKEND="pulseaudio"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --name)    DEVICE_NAME="${2:?--name needs a value}"; shift 2 ;;
     --bitrate) BITRATE="${2:?--bitrate needs a value}"; shift 2 ;;
-    --device)  ALSA_DEVICE="${2:?--device needs a value}"; shift 2 ;;
+    --backend) BACKEND="${2:?--backend needs a value}"; shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
 done
@@ -51,79 +50,123 @@ log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$1"; }
 warn() { printf '\033[1;33mWARNING: %s\033[0m\n' "$1" >&2; }
 
 # ---------------------------------------------------------------------------
-log "1/5 Installing raspotify"
+log "1/6 Checking there is somewhere for the audio to go"
 # ---------------------------------------------------------------------------
-# raspotify is a packaged librespot with a systemd unit already wired up, which
-# is why it's preferred here over building librespot from source: no Rust
-# toolchain on the Pi and no unit file to hand-write.
-if command -v librespot >/dev/null 2>&1 || dpkg -s raspotify >/dev/null 2>&1; then
-  echo "raspotify/librespot already installed - skipping install, will still rewrite config."
-else
-  sudo apt-get update -qq
-  sudo apt-get install -y --no-install-recommends curl
-  # The official installer adds the apt repo and installs the package.
-  curl -sSL https://dtcooper.github.io/raspotify/install.sh | sudo sh
-fi
-
-# ---------------------------------------------------------------------------
-log "2/5 Picking an audio output"
-# ---------------------------------------------------------------------------
-# Left unset by default on purpose: with no explicit device, librespot uses the
-# ALSA default, which is what you want when the Pi's onboard jack or an HDMI
-# display's speakers are already the system default. Override with --device when
-# a USB DAC or HAT needs naming.
-if [ -n "$ALSA_DEVICE" ]; then
-  echo "Using ALSA device: $ALSA_DEVICE"
-else
-  echo "Using the system default ALSA device."
-  echo "Available playback devices (for reference if you need --device):"
-  aplay -l 2>/dev/null || warn "aplay not available; can't list devices."
-fi
-
-# ---------------------------------------------------------------------------
-log "3/5 Writing /etc/raspotify/conf"
-# ---------------------------------------------------------------------------
-# Backed up rather than edited in place - the packaged conf is a documented
-# template worth keeping a copy of.
-if [ -f /etc/raspotify/conf ] && [ ! -f /etc/raspotify/conf.orig ]; then
-  sudo cp /etc/raspotify/conf /etc/raspotify/conf.orig
-  echo "Original config saved to /etc/raspotify/conf.orig"
-fi
-
-sudo mkdir -p /etc/raspotify
-{
-  echo "# Written by deploy/librespot-setup.sh - re-run it to regenerate."
-  echo "LIBRESPOT_NAME=\"$DEVICE_NAME\""
-  echo "LIBRESPOT_BITRATE=\"$BITRATE\""
-  # Announce as a speaker so phones group it sensibly in the Connect picker.
-  echo "LIBRESPOT_DEVICE_TYPE=\"speaker\""
-  # Keeps the device listed in everyone's Connect picker even when idle;
-  # otherwise it disappears from the list until something is cast to it.
-  echo "LIBRESPOT_DISABLE_DISCOVERY=\"\""
-  # Normalise volume so a quiet track followed by a loud one doesn't startle
-  # the room - worth it on a shared speaker nobody is holding a remote for.
-  echo "LIBRESPOT_ENABLE_VOLUME_NORMALISATION=\"\""
-  echo "LIBRESPOT_INITIAL_VOLUME=\"60\""
-  if [ -n "$ALSA_DEVICE" ]; then
-    echo "LIBRESPOT_DEVICE=\"$ALSA_DEVICE\""
+# Worth checking first, because the answer is not obvious: a Pi 5 has no 3.5mm
+# jack at all, so on this build the only output is HDMI - which works only if the
+# attached display actually accepts audio. The ViewSonic TD2230 here does
+# (ELD reports "speakers [0x1] FL/FR"); plenty of monitors don't, and then this
+# whole script buys you nothing until a USB DAC or Bluetooth speaker is added.
+if ls /proc/asound/card*/eld* >/dev/null 2>&1; then
+  if grep -qE 'speakers[[:space:]]+\[0x[1-9a-f]' /proc/asound/card*/eld* 2>/dev/null; then
+    echo "HDMI display reports speakers - audio has somewhere to go."
+  else
+    warn "No HDMI sink reports speakers. Check for a USB DAC or Bluetooth output,"
+    warn "otherwise librespot will run happily and you will hear nothing."
   fi
-} | sudo tee /etc/raspotify/conf >/dev/null
+fi
+aplay -l 2>/dev/null | grep '^card' || warn "aplay lists no cards at all."
 
 # ---------------------------------------------------------------------------
-log "4/5 Enabling the service"
+log "2/6 Installing the librespot binary"
 # ---------------------------------------------------------------------------
-sudo systemctl daemon-reload
-sudo systemctl enable raspotify
-sudo systemctl restart raspotify
-
-# ---------------------------------------------------------------------------
-log "5/5 Checking it came up"
-# ---------------------------------------------------------------------------
-sleep 2
-if sudo systemctl is-active --quiet raspotify; then
-  echo "raspotify is running as \"$DEVICE_NAME\"."
+# From raspotify's apt repo, which packages librespot with no Rust toolchain
+# needed. The repo is added with an explicitly pinned key rather than the
+# upstream `curl ... | sudo sh` one-liner: piping a remote script straight into a
+# root shell is a lot of trust to place in a URL for something this easy to do
+# properly. Same pattern setup-pi.sh already uses for the GitHub CLI.
+if ! command -v librespot >/dev/null 2>&1; then
+  sudo apt-get install -y --no-install-recommends curl gnupg
+  sudo mkdir -p -m 755 /etc/apt/keyrings
+  curl -fsSL https://dtcooper.github.io/raspotify/key.asc \
+    | sudo gpg --dearmor -o /etc/apt/keyrings/raspotify.gpg
+  sudo chmod go+r /etc/apt/keyrings/raspotify.gpg
+  echo "deb [signed-by=/etc/apt/keyrings/raspotify.gpg] https://dtcooper.github.io/raspotify raspotify main" \
+    | sudo tee /etc/apt/sources.list.d/raspotify.list >/dev/null
+  sudo apt-get update -qq
+  sudo apt-get install -y --no-install-recommends raspotify
 else
-  warn "raspotify is not active. Check: journalctl -u raspotify -n 40"
+  echo "librespot already installed - $(librespot --version 2>&1 | head -1)"
+fi
+
+# ---------------------------------------------------------------------------
+log "3/6 Disabling raspotify's own system service"
+# ---------------------------------------------------------------------------
+# The package ships a SYSTEM service, and that cannot work on this setup: PipeWire
+# runs in the logged-in user's session, and a system unit has no access to that
+# user's socket. It would either be silent, or - with the ALSA backend - take
+# exclusive hold of the HDMI device and fight Chromium for it.
+# Masked rather than merely disabled so a package upgrade doesn't re-enable it.
+if systemctl list-unit-files raspotify.service >/dev/null 2>&1; then
+  sudo systemctl disable --now raspotify >/dev/null 2>&1 || true
+  sudo systemctl mask raspotify >/dev/null 2>&1 || true
+  echo "raspotify.service disabled and masked."
+fi
+
+# ---------------------------------------------------------------------------
+log "4/6 Installing a user service"
+# ---------------------------------------------------------------------------
+mkdir -p "$HOME/.config/systemd/user" "$HOME/.cache/librespot"
+
+# Flags are the ones librespot 0.8 actually accepts, checked against
+# `librespot --help` on the machine rather than assumed - the option names have
+# moved between versions, and a wrong one here means the service simply won't
+# start.
+cat > "$HOME/.config/systemd/user/librespot.service" <<UNIT
+[Unit]
+Description=librespot (Spotify Connect target for the wall)
+# PipeWire lives in this same user session; without it there is no sink to open.
+After=pipewire.service pipewire-pulse.service
+Wants=pipewire-pulse.service
+
+[Service]
+Type=simple
+# The pulseaudio backend talks to pipewire-pulse, so librespot SHARES the output
+# with Chromium rather than claiming it exclusively, and its volume lands in the
+# same mixer as everything else on the machine.
+ExecStart=/usr/bin/librespot \\
+  --name "$DEVICE_NAME" \\
+  --backend $BACKEND \\
+  --device-type speaker \\
+  --bitrate $BITRATE \\
+  --enable-volume-normalisation \\
+  --initial-volume 55 \\
+  --cache %h/.cache/librespot \\
+  --cache-size-limit 512M
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+UNIT
+
+systemctl --user daemon-reload
+systemctl --user enable --now librespot
+
+# ---------------------------------------------------------------------------
+log "5/6 Making it survive without a login"
+# ---------------------------------------------------------------------------
+# The kiosk session means this user is normally logged in anyway, but lingering
+# keeps the user service running across session restarts rather than only while
+# someone is "at" the machine.
+sudo loginctl enable-linger "$USER"
+
+# ---------------------------------------------------------------------------
+log "6/6 Checking it came up"
+# ---------------------------------------------------------------------------
+sleep 3
+if systemctl --user is-active --quiet librespot; then
+  echo "librespot is running as \"$DEVICE_NAME\"."
+  PORT="$(sudo ss -tlnp 2>/dev/null | grep -o 'librespot.*' >/dev/null && \
+    sudo ss -tlnp 2>/dev/null | awk '/librespot/ {print $4}' | head -1 || true)"
+  [ -n "${PORT:-}" ] && echo "Listening for Connect on ${PORT}."
+else
+  warn "librespot is not active. Check: journalctl --user -u librespot -n 40"
+fi
+
+if ! systemctl is-active --quiet avahi-daemon; then
+  warn "avahi-daemon is not running - Connect discovery is mDNS, so phones won't"
+  warn "see this device until it is: sudo systemctl enable --now avahi-daemon"
 fi
 
 cat <<EOF
@@ -137,15 +180,17 @@ Done. What to expect:
   - Anyone can use it with their own account. No Development Mode user list, no
     Premium requirement on the *display*, no browser DRM involved.
     (Spotify Connect itself still requires the caster to have Premium.)
+  - Because playback is no longer in the browser tab, it survives page reloads -
+    including the automatic one that follows a deploy.
 
 Useful commands:
 
-  sudo systemctl status raspotify
-  journalctl -u raspotify -f
-  sudo nano /etc/raspotify/conf      # then: sudo systemctl restart raspotify
+  systemctl --user status librespot
+  journalctl --user -u librespot -f
+  \$EDITOR ~/.config/systemd/user/librespot.service   # then: systemctl --user restart librespot
 
 If it never appears in the Connect picker, the usual causes are:
   - the phone is on a different VLAN/subnet (Connect discovery is link-local)
-  - avahi-daemon isn't running: sudo systemctl status avahi-daemon
+  - avahi-daemon isn't running: systemctl status avahi-daemon
   - a firewall is blocking mDNS (UDP 5353)
 EOF

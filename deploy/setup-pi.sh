@@ -52,6 +52,27 @@ sudo apt-get install -y --no-install-recommends \
   gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
   gstreamer1.0-plugins-ugly gstreamer1.0-alsa
 
+# Security updates, applied on their own. This is an always-on, internet-connected
+# device on a home network that nobody logs into for months at a time - exactly the
+# machine that should not be waiting for someone to remember `apt upgrade`.
+#
+# Security origins only, and no automatic reboot: a wall calendar rebooting
+# unattended at 6am is worse than a kernel patch waiting for the next manual one.
+# Autoclean keeps the archive from growing on a device whose disk filled once
+# already (2.8GB of core dumps from a previous install).
+sudo apt-get install -y --no-install-recommends unattended-upgrades
+sudo tee /etc/apt/apt.conf.d/51wallcalendar-unattended >/dev/null <<'UNATTENDED'
+// Managed by wallCalendar deploy/setup-pi.sh
+APT::Periodic::Enable "1";
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+UNATTENDED
+sudo systemctl enable --now unattended-upgrades 2>/dev/null || \
+  warn "unattended-upgrades installed but the service didn't enable; check manually."
+
 # Package/binary name has varied across Raspberry Pi OS releases
 # (chromium-browser vs plain chromium) - try both rather than assuming.
 if ! command -v chromium-browser >/dev/null 2>&1 && ! command -v chromium >/dev/null 2>&1; then
