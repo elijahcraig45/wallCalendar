@@ -1,8 +1,125 @@
 # Wall Calendar
 
-A touchscreen wall calendar for a Raspberry Pi 5 (portrait mount): shared Google
-Calendar view plus Spotify control. Runs as a local Flask app, meant to be
+A touchscreen wall calendar for a Raspberry Pi 5 (**landscape mount**): shared
+Google Calendar view plus Spotify control. Runs as a local Flask app, meant to be
 opened full-screen in a kiosk browser.
+
+The shell is a persistent left rail — Calendar / Music / Web / Accounts — so every
+destination is one tap from anywhere. It replaced a hamburger drawer, which cost
+two taps and hid where you could go.
+
+## What's on it
+
+| Destination | What it does |
+|---|---|
+| **Today** | The morning screen: weather, today's schedule, the notes list, and the next few days. Composed purely from the other endpoints, so it can't disagree with them. |
+| **Calendar** | Day / Week / Month / Agenda (see below) |
+| **Notes** | A shared list backed by **Google Tasks**, so it's on everyone's phone in the Tasks app and inside Google Calendar |
+| **Recipes** | Your own Daisy's Kitchen library, read straight from its Firestore, with a hands-free cooking mode |
+| **Music** | Spotify (see Music, below) |
+| **Web** | A framed browser that cannot strand the wall |
+| **Accounts** | Google sign-in and per-account health |
+
+Shell furniture on every page: a clock, a weather chip, a kitchen-timer chip, and
+a now-playing chip.
+
+### Weather
+
+Open-Meteo — no API key, no account, nothing to expire. Set `WALLCAL_LAT`,
+`WALLCAL_LON` and `WALLCAL_PLACE` in `.env`; it defaults to Atlanta. It also
+supplies the real sunrise/sunset that night dimming keys off.
+
+### Notes — why Tasks and not Keep
+
+Google Keep has **no consumer API**: it's Workspace-only and needs a service
+account with domain-wide delegation, so a personal account cannot use it at all.
+Google Tasks is the equivalent that does work, satisfies the actual requirement
+(it's on your phone), and reuses the OAuth already here.
+
+It needs one added scope, so **an account signed in before this existed must be
+reconnected once** — `python cli.py google`, or the Reconnect button the Notes
+page shows. Until then Notes explains exactly that instead of failing obscurely;
+the calendar is unaffected.
+
+### Recipes
+
+`firestore.rules` in [daisys-kitchen](https://github.com/elijahcraig45/daisys-kitchen)
+grants `allow read: if true` on the recipes collection, so the wall reads it over
+plain HTTPS with **no auth, no API key and no Firebase SDK** — just
+`WALLCAL_RECIPES_PROJECT` (default `recipe-f644f`). Reading the source of truth
+rather than framing the Flutter app is what makes a **cooking mode** possible: one
+step at a time in type readable across a kitchen, with the step's timer one tap
+away. The deployed app is still reachable from the Web page as a fallback.
+
+The schema already carries `timerSeconds`/`timerLabel` per step; none of the real
+recipes set them yet, and when they do the timer button appears automatically.
+
+### Kitchen timers
+
+Multiple named countdowns, a WebAudio chime (no audio file to ship), and state
+stored as **absolute end timestamps in localStorage** — so a timer started from a
+recipe keeps running while you walk over to the calendar, and survives a page
+reload without drifting. Browsers refuse audio before a user gesture, so the audio
+context is primed on first touch; a timer that finishes before anyone has touched
+the screen still shows visually and wakes a dimmed display.
+
+### Ambient
+
+The screen dims after dark and any touch wakes it for a few minutes. The schedule
+follows real sunset/sunrise from the weather rather than a fixed hour, falling back
+to 22:00–06:00 when weather is unavailable.
+
+### Monthly themes
+
+The accent colour and a very faint background wash change with the month. Text
+colour, contrast and type never move — this is read from across a room. Turn it off
+with `localStorage.calendar_themes = "off"`.
+
+## Views
+
+| View | What it's for |
+|---|---|
+| Day | Hour grid for one day plus a detail pane listing that day's events with location and owner |
+| Week | Seven-column hour grid, all-day band on top, current-time line |
+| Month | 7×N grid; all-day events as color bars, timed events as dot + time + title |
+| Agenda | Next 30 days as balanced columns across the full width |
+
+Layout notes worth knowing before changing them:
+
+- **The time grid shows a window of hours, not midnight-to-midnight.** The window
+  is derived from the events on screen (waking-hours default, widened for
+  anything outside it, always covering the current hour when today is visible),
+  and hours stretch to fill the available height. A normal week needs no
+  scrolling at all.
+- **Month cells compute how many events they can show** from measured cell
+  height rather than a fixed count — a 1024×600 panel has roughly half the cell
+  height of a 1080p one. `--pill-height` / `--day-number-height` /
+  `--overflow-height` are plain px per breakpoint *on purpose*: `calendar.js`
+  reads them back with `getPropertyValue()`, and a `clamp()` expression comes
+  back as literal text rather than a number.
+- **Everything sizes in `rem`** off a single `clamp()`ed root font-size, so the
+  whole UI scales with the panel.
+- **`.hidden` carries `!important`, on purpose.** It's the one utility the whole
+  app toggles from JS, and any `#thing { display: flex }` outranks a plain class
+  regardless of source order. That trap was hit four separate times (a rail chip
+  shipped visible where it should have been suppressed; all three Recipes views
+  rendered stacked; the stale badge and weather chip could not be hidden). Each
+  time the element was present, correct, and simply would not go away. `npm test`
+  asserts the `!important` is still there.
+- **The frontend is plain scripts sharing one global scope, not modules.** Four
+  shell scripts load on every page, then one page script — and a page script
+  declaring the same top-level name silently replaces the shell's. `timers.js` had
+  `render()`, `notes.js` had `render(payload)`, and the shell's per-second tick
+  then called the notes renderer with no argument, throwing every second on that
+  page. `npm test` now detects name collisions statically; shell-wide files use
+  prefixed names (`renderTimers`, `loadTimers`) for the same reason.
+- **Watch asterisks inside CSS comments.** `#device-*/#playlist-*` contains `*/`,
+  which closes the comment early; the leftover prose then parses as a broken
+  selector whose error recovery swallows the *next whole rule*. That silently
+  killed `.modal-overlay` for a long time, so the day-event overlay rendered inline
+  in the page instead of as a centered modal.
+- After 4 minutes of no touch the calendar closes anything open and returns to
+  the current month, so a wall left on next March doesn't stay there.
 
 ## Stack
 
@@ -68,8 +185,132 @@ To hide a calendar from the display, add its `calendar_id` (from
 python server.py
 ```
 
-Open `http://localhost:5000` - defaults to the calendar month view. Hamburger
-menu (top-left) reaches Spotify and Browser.
+Open `http://localhost:5000` - defaults to the calendar month view. The left rail
+reaches Music, Web and Accounts.
+
+### Demo mode
+
+```bash
+WALLCAL_DEMO=1 python server.py                          # two synthetic people
+WALLCAL_DEMO=1 WALLCAL_DEMO_ACCOUNTS=1 python server.py  # one, as the real wall is today
+```
+
+Swaps every Google Calendar read for synthetic fixtures (`app/demo_data.py`) -
+deliberately dense, with overlapping, multi-day, all-day and late-night events,
+so layout work can be done and screenshotted without touching a real calendar.
+Writes raise rather than being faked, so a demo run can never look like it saved
+something that went nowhere.
+
+Demo mode covers Spotify too (`app/demo_spotify.py`), and it exists for a
+different reason: the live API answers `now_playing` with null and `devices` with
+`[]` whenever nothing happens to be playing, so the biggest surface on the Music
+page can't be designed or verified against a real account at all. Two deliberate
+differences from the calendar fixtures — playback commands are **faked rather than
+refused** (there's no real data to corrupt, and the UI is only testable if
+pressing play actually plays), and cover art is generated inline as SVG data URIs,
+so a demo run makes no external image requests. The Web Playback SDK isn't loaded
+in demo mode; it has no session to authenticate and only produces console noise.
+
+## Layout tests
+
+```bash
+npm install && npx playwright install chromium   # once
+npm test
+```
+
+Playwright starts two app instances itself - :5000 with two synthetic people and
+:5001 with none (for the empty state) - so **stop any `server.py` you have running
+first**; both ports must be free or the run fails immediately, on purpose.
+
+Playwright starts the app in demo mode itself and checks every view at
+**1024×600** (official Pi 7" DSI), **1280×800** (newer 7") and **1920×1080**.
+These are correctness checks, not pixel comparisons: cells clipping their own
+content, a time grid that overflows or opens scrolled, concurrent events drawn on
+top of each other, a page that scrolls sideways, sheets off-screen.
+
+`tests/wall.spec.js` covers the calendar and shell; `tests/spotify.spec.js`
+covers the Music page. Because demo playback state is real, the Spotify tests
+assert round-trips — play/pause flips, Next lands on a different track, tapping a
+row in a playlist starts *that* track — rather than just that the buttons exist.
+
+`npm test` also runs `tests/api_checks.py` first — plain Python, no pytest, so
+nothing extra has to be installed on the Pi:
+
+```bash
+npm run test:api     # server-side checks only
+npm run test:ui      # Playwright only
+```
+
+Those cover states that need the server *rigged* rather than driven, which a
+browser can't do: an install with no Spotify account signed in (the default after
+setup — this used to make the shell's poll 500 every five seconds forever), demo
+mode refusing calendar writes, the month-grid bounds arithmetic, and two static
+checks that exist because their bugs were invisible at runtime — global script name
+collisions, and `.hidden` keeping its `!important`.
+
+### A note on developing this on a work laptop
+
+The Home Depot's TLS-inspecting proxy re-signs HTTPS, and Python's `requests` uses
+certifi rather than the macOS keychain — so `curl` works and `requests` fails with
+`SSLError` for weather, recipes and anything else outbound. Nothing is wrong with
+the code and **certificate verification is not disabled**; set `REQUESTS_CA_BUNDLE`
+to a bundle containing the corporate root if you want it working there. On the Pi at
+home there's no proxy. Where the live call couldn't be made here, the parser was
+verified against a real payload captured over `curl` instead.
+
+One lesson encoded in both suites: **assert geometry, not counts.** The queue view
+once rendered with bullet points and a full-width album cover, and a row-count
+assertion passed the entire time because all the rows were present.
+
+One test re-runs the month and week views with everything forced to **Verdana**.
+Raspberry Pi OS has none of `-apple-system` / Segoe UI / Roboto and renders in
+DejaVu Sans, which is wider than any Mac default - Verdana is wider still, so
+passing under it means the layout has real slack rather than being tuned to
+macOS font metrics. Screenshots land in `test-results/shots/` (override with
+`SHOT_DIR`).
+
+If your panel isn't one of those three resolutions, add it to `VIEWPORTS` in
+`tests/wall.spec.js` and re-run before trusting the layout on it.
+
+## Music
+
+Two panes, not the phone shape this started as. Now-playing holds permanent space
+on the left (large art, transport, scrub, volume, current speaker); browse, search
+and every detail view share the column on the right. What used to be a
+mini-player that expanded to a full-screen overlay plus four bottom sheets is now
+one pane you never have to dismiss to see what's playing.
+
+- **Detail views are panes, not sheets.** `initPane` in `static/spotify.js` keeps
+  `initPanel`'s `{open, close}` shape, so the fetch/render logic that drove the
+  old sheets is unchanged. A small back stack means Back walks album → artist →
+  home rather than always dumping you at home.
+- **The search field is in the pane's persistent header**, so typing while a
+  detail view is open resets the pane to home first — results render there, and
+  without the reset typing appeared to do nothing.
+- **A now-playing chip lives in the rail on every page**, so music is visible and
+  pausable from the calendar. One shared poller in `nav.js` feeds both it and the
+  Music page rather than each polling separately — every 5s on the Music page,
+  where a progress bar has to look live, and every 20s elsewhere.
+- **Any page other than the calendar returns to the calendar after 10 minutes
+  idle** (`nav.js`). The calendar's own 4-minute reset only ever ran on the
+  calendar; the rail made "left on Music forever, showing no calendar at all" the
+  more likely failure.
+
+### Playback: two routes, and the browser one is the fragile one
+
+The in-page Web Playback SDK needs Widevine DRM **and** Premium on the display
+itself, and Chromium on Pi OS arm64 is a shaky place to depend on that — driving
+the page under headless Chromium fails with `No supported keysystem was found`,
+exactly what a Widevine-less build reports. When the SDK never registers a
+device, the device picker now says so instead of offering a display that can't
+play anything.
+
+The sturdier route is `bash deploy/librespot-setup.sh`, which makes the Pi a
+Spotify Connect speaker: everyone casts from the full Spotify app on their own
+phone with their own account, which sidesteps every limit listed below —
+Development Mode's 25-user cap, the 10-result search, the missing radio. The two
+coexist; the Pi shows up in the wall's own device picker as another speaker.
+**That script has never run on hardware.** See `deploy/README.md`.
 
 ## Known platform limits (not bugs)
 
@@ -85,3 +326,11 @@ menu (top-left) reaches Spotify and Browser.
 - **Playlist tracks** use `/v1/playlists/{id}/items` directly via `requests`,
   not spotipy's `playlist_items()` - spotipy still calls the old `/tracks`
   path, which Spotify deprecated (403s) in its March 2026 API migration.
+- **Some playlists can't be read at all.** Measured against the real account:
+  `/tracks` 403s for *every* playlist (as above), and `/items` 403s for *some* -
+  it correlates with playlists owned by other people, though not reliably (one
+  other-user playlist read fine). Spotify's actual rule isn't discoverable from
+  outside and there's no remaining endpoint to fall back to, so the app reports
+  it: the track list shows an explanation and a toast instead of spinning on
+  "Loading..." forever. This is the clearest ongoing argument for the Connect
+  route - a phone casting to the Pi has no such restriction.

@@ -1,0 +1,20 @@
+{
+  "name": "wallcalendar",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Layout tests for the wall calendar. The app itself is the Flask project in this directory - this exists only so Playwright can drive it.",
+  "scripts": {
+    "test": "npm run test:api && playwright test",
+    "test:api": ".venv/bin/python tests/api_checks.py",
+    "test:ui": "playwright test",
+    "test:headed": "playwright test --headed"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elijahcraig45/wallCalendar.git"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}

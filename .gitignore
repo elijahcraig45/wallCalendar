@@ -4,3 +4,6 @@ __pycache__/
 .env
 secrets/
 data/account_labels.json
+node_modules/
+test-results/
+playwright-report/
