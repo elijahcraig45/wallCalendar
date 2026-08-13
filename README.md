@@ -65,10 +65,16 @@ To set up the Google key:
 2. Create an API key and **restrict it to the Pollen API only** (Credentials →
    the key → API restrictions). It is otherwise usable against every enabled API
    in the project.
-3. Add it to `.env` — which is gitignored — as `WALLCAL_POLLEN_KEY=...`, then
-   restart: `sudo systemctl restart wallcalendar`.
+3. Add it to the Pi's `.env` — `~/calendar/wallCalendar/.env` — as
+   `WALLCAL_POLLEN_KEY=...`, then `sudo systemctl restart wallcalendar`.
+   `.env` is gitignored, so push-to-deploy never overwrites it and the key
+   survives every deploy; equally, nothing propagates it for you.
 4. Check it took, without printing the key:
    `curl -s localhost:5000/api/weather/air | python3 -m json.tool | grep source`
+   — it should say `Google Pollen` rather than `pollen.com`.
+5. Back it up into the private `wallCalendar-secrets` repo's `.env`, which is
+   where the rest of this project's credentials are kept. That repo is a
+   point-in-time backup, not a live mirror, so it needs doing by hand.
 
 The key is sent to Google as an `X-Goog-Api-Key` **header**, never as a `?key=`
 query parameter: `requests` includes the request URL in its exception messages, so
