@@ -356,12 +356,7 @@ test.describe("light-theme contrast sweep", () => {
      becomes invisible. So rather than trusting the sweep of replacements, this
      walks every visible text node on every page and measures the contrast it
      actually renders at. */
-  for (const target of ["/", "/today", "/recipes", "/browser", "/accounts", "/spotify"]) {
-    test(`no unreadable text on ${target}`, async ({ page }) => {
-      await page.goto(target);
-      await page.waitForTimeout(1600);
-
-      const offenders = await page.evaluate(() => {
+  const measure = () => {
         const channel = (v) => {
           const c = v / 255;
           return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
@@ -430,9 +425,42 @@ test.describe("light-theme contrast sweep", () => {
           }
         });
         return bad;
-      });
+      };
 
+  const findOffenders = (page) => page.evaluate(measure);
+
+  for (const target of ["/", "/today", "/recipes", "/browser", "/accounts", "/spotify"]) {
+    test(`no unreadable text on ${target}`, async ({ page }) => {
+      await page.goto(target);
+      await page.waitForTimeout(1600);
+      const offenders = await findOffenders(page);
       expect(offenders, `unreadable text on ${target}`).toEqual([]);
     });
   }
+
+  /* The loop above only ever proves ONE palette: themeForMonth() resolves by
+     today's date, so whichever month it happens to be is the only one measured
+     and the other twelve ship unverified. That is a poor deal on a conversion
+     whose failure mode is invisible text. This pins each palette through the
+     documented localStorage override and measures them all. */
+  test("every palette in themes.js is readable", async ({ page }) => {
+    await page.goto("/");
+    const palettes = await page.evaluate(() =>
+      [...MONTHLY_THEMES, NIGHT_THEME, THEME_TEMPLATE].map((t) => ({ name: t.name, theme: t }))
+    );
+    // Twelve months plus night plus the template users are told to copy.
+    expect(palettes.length).toBe(14);
+
+    const failures = [];
+    for (const { name, theme } of palettes) {
+      await page.addInitScript((t) => {
+        localStorage.setItem("wallcal_theme", JSON.stringify(t));
+      }, theme);
+      await page.goto("/today");     // the densest mix of surfaces and dim text
+      await page.waitForTimeout(1200);
+      const offenders = await findOffenders(page);
+      if (offenders.length) failures.push({ palette: name, offenders: offenders.slice(0, 4) });
+    }
+    expect(failures, "palettes with unreadable text").toEqual([]);
+  });
 });

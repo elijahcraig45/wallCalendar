@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
   <title>Wall Calendar</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ build }}">
 </head>
 <body>
   <div id="app">
@@ -128,11 +128,11 @@
        timers.js  - uses showToast/wakeScreen from nav.js at runtime
      panel.js used to live on the calendar page; the weather and timer overlays
      are shell furniture, so it had to move up here. #}
-  <script src="/static/panel.js"></script>
-  <script src="/static/themes.js"></script>
-  <script src="/static/weather.js"></script>
-  <script src="/static/nav.js"></script>
-  <script src="/static/timers.js"></script>
+  <script src="/static/panel.js?v={{ build }}"></script>
+  <script src="/static/themes.js?v={{ build }}"></script>
+  <script src="/static/weather.js?v={{ build }}"></script>
+  <script src="/static/nav.js?v={{ build }}"></script>
+  <script src="/static/timers.js?v={{ build }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

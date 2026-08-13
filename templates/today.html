@@ -13,7 +13,15 @@
    which is why it can't drift out of step with the pages it summarises. #}
 <div id="today-view">
   <section id="today-primary">
-    <div id="today-weather"></div>
+    {# The left column used to hold only the weather card, which left about two
+       thirds of a 1080px panel as empty ground. It now carries the three things
+       worth reading from across a room: what's next, the weather, and the rest
+       of the week's forecast. #}
+    <div id="today-aside">
+      <div id="today-next-up"></div>
+      <div id="today-weather"></div>
+      <div id="today-forecast"></div>
+    </div>
     <div id="today-schedule">
       <h3>Today</h3>
       <ul id="today-events"></ul>
@@ -30,5 +38,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/today.js"></script>
+<script src="/static/today.js?v={{ build }}"></script>
 {% endblock %}

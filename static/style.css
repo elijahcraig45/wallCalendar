@@ -2467,7 +2467,10 @@ textarea.text-input {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr);
+  /* Coming up carries a whole week and scrolls; today's list is usually a dozen
+     short rows. 3fr/1fr gave the short list the wide column and squeezed the
+     long one, so the week gets a real share of the width. */
+  grid-template-columns: minmax(0, 5fr) minmax(300px, 2fr);
   gap: 18px;
   padding: 16px 18px;
 }
@@ -2476,10 +2479,20 @@ textarea.text-input {
   #today-view { grid-template-columns: 1fr; overflow-y: auto; }
 }
 
-#today-primary { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(0, 2fr); gap: 18px; min-height: 0; }
+#today-primary { display: grid; grid-template-columns: minmax(230px, 1fr) minmax(0, 2fr); gap: 18px; min-height: 0; }
 
 @media (max-width: 1400px) {
   #today-primary { grid-template-columns: 1fr; }
+}
+
+/* The aside stacks up-next, weather and the forecast. It fills the column
+   height: with only the weather card in here, two thirds of a 1080px panel was
+   empty ground, which is most of why this page read as unfinished. */
+#today-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
 }
 
 #today-weather {
@@ -2487,13 +2500,77 @@ textarea.text-input {
   border-radius: 12px;
   background: var(--surface);
   text-align: center;
-  align-self: start;
 }
 
-.today-weather-icon svg { width: clamp(56px, 10vh, 96px); height: clamp(56px, 10vh, 96px); color: var(--accent); }
+.today-weather-icon svg { width: clamp(56px, 9vh, 88px); height: clamp(56px, 9vh, 88px); color: var(--accent); }
 .today-weather-temp { font-size: clamp(2rem, 5vh, 3.2rem); font-weight: 600; line-height: 1; }
 .today-weather-label { font-size: 1rem; margin-top: 6px; }
 .today-weather-range, .today-weather-sun { font-size: 0.82rem; color: var(--text-dim); margin-top: 6px; }
+
+/* ---------- up next ---------- */
+
+#today-next-up {
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--surface);
+  border-left: 5px solid var(--accent);
+}
+
+.today-next-up-label {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.today-next-up-when {
+  font-size: clamp(1.4rem, 3.2vh, 2rem);
+  font-weight: 600;
+  line-height: 1.1;
+  margin-top: 4px;
+  color: var(--accent);
+}
+
+.today-next-up-title {
+  font-size: 1.15rem;
+  font-weight: 500;
+  margin-top: 4px;
+  /* Long titles are common ("Stay at Hilton Garden Inn Nashville Downtown - ...")
+     and this card is narrow, so wrap rather than clip. */
+  overflow-wrap: anywhere;
+}
+
+.today-next-up-meta { font-size: 0.82rem; color: var(--text-dim); margin-top: 4px; }
+.today-next-up-empty { font-size: 0.95rem; color: var(--text-dim); margin-top: 6px; }
+
+/* ---------- 3-day forecast ---------- */
+
+#today-forecast {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 10px;
+}
+
+#today-forecast:empty { display: none; }
+
+.today-forecast-day {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 12px 6px;
+  text-align: center;
+}
+
+.today-forecast-name {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.today-forecast-icon svg { width: 30px; height: 30px; color: var(--accent); margin: 6px 0 2px; }
+.today-forecast-temps { font-size: 0.88rem; color: var(--text-dim); }
+.today-forecast-temps strong { color: var(--text); font-weight: 600; }
 
 #today-schedule, #today-notes-block, #today-next-block { min-height: 0; display: flex; flex-direction: column; }
 #today-view h3 { margin: 0 0 10px; font-size: 0.92rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
@@ -2509,18 +2586,38 @@ textarea.text-input {
 
 #today-secondary { display: grid; grid-template-rows: 1fr; gap: 18px; min-height: 0; }
 
+/* A row is a time gutter and a body, not three stacked lines. Stacked, each row
+   needed ~88px for one event, so nine events filled the whole panel; aligning the
+   times into a column also makes the day scannable rather than just listed. */
 .today-event {
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 12px;
   border-left: 4px solid var(--accent);
-  background: var(--tint);
   border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
+  padding: 9px 12px;
+  margin-bottom: 6px;
+  /* backgroundColor is set inline to a tint of the event's own Google colour. */
+  background: var(--surface);
 }
 
 .today-event--past { opacity: 0.45; }
-.today-event-when { font-size: 0.8rem; color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.today-event-title { font-size: 1.05rem; margin: 2px 0 2px; }
-.today-event-meta { font-size: 0.78rem; color: var(--text-dim); }
+
+.today-event-when {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.3;
+}
+
+/* Stacked inside the gutter so a "Sat–Tue" range doesn't squeeze the time. */
+.today-event-day { display: block; font-weight: 600; color: var(--text); }
+.today-event-time { display: block; }
+
+.today-event-title { font-size: 1.02rem; line-height: 1.3; overflow-wrap: anywhere; }
+.today-event-meta { font-size: 0.78rem; color: var(--text-dim); margin-top: 1px; }
+.today-event-meta:empty { display: none; }
 
 .today-note {
   padding: 9px 0;

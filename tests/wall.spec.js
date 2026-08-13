@@ -476,6 +476,43 @@ test.describe("kiosk longevity", () => {
       .toBe(expectedDays);
   });
 
+  /* Pushing to main restarts Flask, but nothing restarts the kiosk browser - it
+     holds the same document from boot, so it keeps rendering the CSS it loaded
+     then. A deploy of the light theme succeeded on every measure except being
+     visible on the wall. The client now polls the build and reloads itself. */
+  test("a new build reloads the wall", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("#month-grid .day-cell");
+
+    // Survives only until a reload, which is how the reload gets detected.
+    await page.evaluate(() => { window.__beforeDeploy = true; });
+
+    await page.route("**/api/version", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ build: "a-different-build", started_at: 1 }),
+      })
+    );
+
+    // Poll on a timer in production; called directly here rather than waiting a
+    // minute for it.
+    await page.evaluate(() => checkBuild());
+    await page.waitForFunction(() => window.__beforeDeploy === undefined, null, { timeout: 5000 });
+    await expect(page.locator("#month-grid .day-cell").first()).toBeVisible();
+  });
+
+  test("an unchanged build does not reload the wall", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("#month-grid .day-cell");
+    await page.evaluate(() => { window.__beforeDeploy = true; });
+
+    // Reloading on every poll would restart the page each minute forever, which
+    // is a far worse failure than a stale one.
+    await page.evaluate(async () => { await checkBuild(); await checkBuild(); });
+    await page.waitForTimeout(600);
+    expect(await page.evaluate(() => window.__beforeDeploy)).toBe(true);
+  });
+
   test("navigating away cancels the now-line timer", async ({ page }) => {
     await page.clock.install();
     const errors = [];

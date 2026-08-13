@@ -222,3 +222,46 @@ function resetIdleTimer() {
 });
 
 resetIdleTimer();
+
+/* ---------- picking up a deploy ----------
+   Pushing to main restarts the Flask service, but nothing restarts the kiosk
+   browser: it has held the same document since boot, so it went on rendering
+   whatever CSS and JS it loaded then. A deploy could succeed completely and be
+   invisible on the wall, which is exactly what happened with the light theme.
+
+   So: poll the build, and reload when it changes. The asset URLs carry the build
+   as a query string, so the reload fetches the new files rather than
+   revalidating into the cached ones. */
+
+const BUILD_POLL_MS = 60 * 1000;
+let knownBuild = null;
+
+async function checkBuild() {
+  try {
+    const resp = await fetch("/api/version", { cache: "no-store" });
+    if (!resp.ok) return;
+    const { build } = await resp.json();
+    if (!build) return;
+    if (knownBuild === null) {
+      knownBuild = build;
+      return;
+    }
+    if (build === knownBuild) return;
+
+    // Don't yank the page out from under someone mid-tap. A wall calendar is
+    // idle almost all the time, so waiting costs nothing and a reload during
+    // use is jarring - and would lose an in-progress timer or search.
+    if (Date.now() - lastInteractionAt < 30 * 1000) return;
+    window.location.reload();
+  } catch (e) {
+    // Offline, or the service is mid-restart. Try again next tick.
+  }
+}
+
+let lastInteractionAt = 0;
+["pointerdown", "keydown", "wheel", "touchstart"].forEach((evt) => {
+  document.addEventListener(evt, () => { lastInteractionAt = Date.now(); }, { passive: true });
+});
+
+checkBuild();
+setInterval(checkBuild, BUILD_POLL_MS);

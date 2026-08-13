@@ -13,6 +13,7 @@ from app import (
     preferences,
     recipes_service,
     spotify_service,
+    version,
     weather_service,
 )
 from app.auth import google_auth
@@ -27,7 +28,9 @@ app.secret_key = FLASK_SECRET_KEY
 def inject_globals():
     # Lets every template render the demo-mode banner without each view
     # having to remember to pass the flag through.
-    return {"demo_mode": DEMO_MODE}
+    # `build` cache-busts the asset URLs, so a reload after a deploy is
+    # guaranteed to fetch the new CSS rather than revalidate into the old one.
+    return {"demo_mode": DEMO_MODE, "build": version.BUILD}
 
 
 @app.errorhandler(calendar_service.DemoModeError)
@@ -82,6 +85,13 @@ def handle_google_auth_error(e):
 def index():
     today = dt.date.today()
     return render_template("calendar.html", year=today.year, month=today.month)
+
+
+@app.route("/api/version")
+def api_version():
+    """What build this process is running. The wall polls this and reloads itself
+    when it changes - see app/version.py for why that's necessary."""
+    return jsonify({"build": version.BUILD, "started_at": version.STARTED_AT})
 
 
 @app.route("/api/calendar/<int:year>/<int:month>")
