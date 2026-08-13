@@ -7,3 +7,4 @@ data/account_labels.json
 node_modules/
 test-results/
 playwright-report/
+data/weather_cache.json

@@ -9,14 +9,19 @@ of a hardcoded hour so the wall dims with the actual seasons.
 """
 
 import datetime as dt
+import json
 import time
 
 import requests
 
-from app.config import DEMO_MODE, WEATHER_LABEL, WEATHER_LAT, WEATHER_LON
+from app.config import DEMO_MODE, PROJECT_ROOT, WEATHER_LABEL, WEATHER_LAT, WEATHER_LON
 
 API_URL = "https://api.open-meteo.com/v1/forecast"
-TIMEOUT_SECONDS = 8
+# The Pi's wifi is not fast; 8s was tight enough to produce real ReadTimeouts.
+TIMEOUT_SECONDS = 20
+# One retry, because a single timeout on a household connection is normal and the
+# alternative is showing no weather for the next two minutes.
+ATTEMPTS = 2
 CACHE_TTL_SECONDS = 900          # conditions don't move fast; 15 min is plenty
 ERROR_CACHE_TTL_SECONDS = 120    # but don't hammer a failing endpoint either
 
@@ -43,6 +48,28 @@ _WMO = {
 
 _cache: tuple[float, dict] | None = None
 _last_good: dict | None = None
+
+# The last good reading, on disk. In-memory alone wasn't enough: pushing to main
+# restarts the service, so a deploy followed by one transient timeout left the wall
+# with no weather at all and nothing to fall back to. A slightly stale temperature
+# is strictly better than an empty header.
+_CACHE_FILE = PROJECT_ROOT / "data" / "weather_cache.json"
+
+
+def _load_persisted() -> dict | None:
+    try:
+        return json.loads(_CACHE_FILE.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def _persist(payload: dict) -> None:
+    try:
+        _CACHE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _CACHE_FILE.write_text(json.dumps(payload))
+    except OSError:
+        # Losing the cache is survivable; failing a request over it is not.
+        pass
 
 
 def describe(code: int | None) -> tuple[str, str]:
@@ -102,6 +129,18 @@ def _round(value):
 
 
 def _fetch() -> dict:
+    last_error: Exception | None = None
+    for attempt in range(ATTEMPTS):
+        try:
+            return _fetch_once()
+        except requests.exceptions.RequestException as exc:
+            last_error = exc
+            if attempt + 1 < ATTEMPTS:
+                time.sleep(1.5)
+    raise last_error  # type: ignore[misc]
+
+
+def _fetch_once() -> dict:
     response = requests.get(
         API_URL,
         params={
@@ -145,10 +184,12 @@ def get_weather() -> dict:
         result["stale"] = False
         result["fetched_at"] = dt.datetime.now().isoformat(timespec="seconds")
         _last_good = result
+        _persist(result)
     except Exception as exc:  # noqa: BLE001 - see docstring
         message = f"Couldn't reach the weather service ({type(exc).__name__})."
-        if _last_good is not None:
-            result = {**_last_good, "stale": True, "errors": [message]}
+        fallback = _last_good or _load_persisted()
+        if fallback is not None:
+            result = {**fallback, "stale": True, "errors": [message]}
         else:
             result = {
                 "place": WEATHER_LABEL,
