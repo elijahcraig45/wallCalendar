@@ -253,6 +253,28 @@ def check_weather_alerts_parsing():
         alerts_service._drop_expired(weird)["count"] == 1,
     )
 
+    # A naive timestamp (no offset) used to raise TypeError on the comparison
+    # rather than ValueError on the parse - a different exception, straight past
+    # the guard, 500ing the one endpoint that carries tornado warnings. Treated as
+    # local time, which is what a stamp with no offset means in practice.
+    naive_future = dt.datetime.now().replace(microsecond=0) + dt.timedelta(hours=2)
+    naive_past = dt.datetime.now().replace(microsecond=0) - dt.timedelta(hours=2)
+    naive = {
+        "alerts": [
+            {"event": "Tornado Warning", "expires": naive_future.isoformat(), "urgent": True},
+            {"event": "Flood Advisory", "expires": naive_past.isoformat(), "urgent": False},
+        ],
+        "count": 2,
+        "urgent_count": 1,
+    }
+    filtered_naive = alerts_service._drop_expired(naive)
+    check(
+        "a naive expiry timestamp doesn't crash the endpoint",
+        filtered_naive["count"] == 1
+        and filtered_naive["alerts"][0]["event"] == "Tornado Warning",
+        f"got {[a['event'] for a in filtered_naive['alerts']]}",
+    )
+
 
 def check_weather_hourly_is_anchored_to_now():
     """The hourly series starts at local midnight, so slicing from index 0 asked

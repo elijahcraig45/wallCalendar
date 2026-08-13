@@ -248,9 +248,17 @@ def _drop_expired(payload: dict) -> dict:
         expires = alert.get("expires")
         if expires:
             try:
-                if dt.datetime.fromisoformat(expires) < now:
+                stamp = dt.datetime.fromisoformat(expires)
+                # NWS sends an offset ("...-05:00"), but a naive timestamp would
+                # raise TypeError on the comparison rather than ValueError on the
+                # parse - a different exception, past the guard, and a 500 on the
+                # only endpoint that carries tornado warnings. Assume local time,
+                # which is what a stamp with no offset means in practice.
+                if stamp.tzinfo is None:
+                    stamp = stamp.astimezone()
+                if stamp < now:
                     continue
-            except ValueError:
+            except (ValueError, TypeError, OSError):
                 pass
         kept.append(alert)
 
