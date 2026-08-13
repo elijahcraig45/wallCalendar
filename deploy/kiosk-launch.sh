@@ -77,4 +77,22 @@ while true; do
   # eats the CPU the calendar needs.
   echo "kiosk-launch: chromium exited ($?); restarting in 3s" >&2
   sleep 3
+
+  # Re-exec so an updated version of THIS script takes effect.
+  #
+  # Without it, supervision and push-to-deploy quietly fight each other: bash
+  # parses the whole `while` loop up front, so a running supervisor keeps launching
+  # the old command line no matter how many times Chromium is restarted. That is
+  # exactly how the on-screen-keyboard flags appeared to "not work" after a
+  # successful deploy - the flags were on disk and the process was still being
+  # started without them.
+  #
+  # Guarded on the file still parsing: a syntax error mid-edit would otherwise
+  # exec a broken script and leave the wall black with nothing to recover it. If it
+  # doesn't parse, carry on with the version already in memory.
+  if bash -n "$0" 2>/dev/null; then
+    exec "$0"
+  else
+    echo "kiosk-launch: $0 has a syntax error; staying on the loaded version" >&2
+  fi
 done
