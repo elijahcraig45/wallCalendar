@@ -1,0 +1,52 @@
+name: Deploy to the wall
+
+# push-to-main ONLY, and that is a security boundary, not a preference.
+#
+# The runner for this workflow is self-hosted on a Raspberry Pi inside a home
+# network, and this repository is public. GitHub advises against self-hosted
+# runners on public repos precisely because a pull request from a fork can
+# otherwise execute arbitrary code on the runner. `push` events require write
+# access to this repo, so a fork cannot trigger them.
+#
+# Do not add `pull_request`, `pull_request_target`, or `issue_comment` triggers
+# to any workflow in this repository while a self-hosted runner is registered.
+on:
+  push:
+    branches: [main]
+
+# Two pushes in quick succession must not deploy over each other mid-restart.
+concurrency:
+  group: deploy-to-wall
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, wallcalendar]
+    timeout-minutes: 20
+    steps:
+      # No actions/checkout: the wall runs from ~/calendar/wallCalendar, which is
+      # its own long-lived clone with the venv and the secrets in it. Checking out
+      # into the runner workspace would just produce a second, useless copy.
+      - name: Pull, verify, restart
+        run: |
+          set -euo pipefail
+          cd "$HOME/calendar/wallCalendar"
+          deploy/git-autorebuild.sh
+
+      - name: Confirm the wall is actually serving
+        run: |
+          set -euo pipefail
+          cd "$HOME/calendar/wallCalendar"
+          echo "deployed: $(git log --oneline -1)"
+          systemctl is-active wallcalendar.service
+          for i in $(seq 1 10); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://127.0.0.1:5000/ || true)
+            if [ "$code" = "200" ]; then echo "app: 200"; exit 0; fi
+            sleep 2
+          done
+          echo "app did not return 200 after restart" >&2
+          journalctl -u wallcalendar.service -n 30 --no-pager >&2 || true
+          exit 1

@@ -40,5 +40,21 @@ source .venv/bin/activate
 pip install -q -r requirements.txt
 deactivate
 
+# Gate the restart on the server-side checks, and run them *before* restarting:
+# until the restart the running process still holds the previous code in memory,
+# so a bad commit leaves a working wall rather than a broken one. These are the
+# fast pure-Python checks (no browser, no network), so this costs a second or two.
+if [ -f tests/api_checks.py ]; then
+  echo "Running server-side checks against the new code..."
+  if ! ./.venv/bin/python tests/api_checks.py; then
+    echo "" >&2
+    echo "Checks FAILED - not restarting. The wall keeps serving the previous code," >&2
+    echo "but the working tree is now at the new commit, so this will not retry on" >&2
+    echo "its own: fix it and push again, or roll back with" >&2
+    echo "  git -C \"\$PWD\" reset --hard HEAD~1 && sudo systemctl restart wallcalendar.service" >&2
+    exit 1
+  fi
+fi
+
 sudo systemctl restart wallcalendar.service
 echo "Restarted wallcalendar.service."
