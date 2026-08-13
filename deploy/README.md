@@ -149,3 +149,25 @@ Note the chicken-and-egg this fix had to be dragged through: the guard lives in
 the repo it updates, so a Pi already wedged by a dirty tree cannot pull the fix
 that unwedges it. Clear it once by hand (`git checkout -- <file>`), after which it
 self-heals.
+
+## Push-to-deploy
+
+A self-hosted GitHub Actions runner on the Pi means pushing to `main` deploys in
+seconds. Set it up once:
+
+```bash
+gh api -X POST repos/elijahcraig45/wallCalendar/actions/runners/registration-token --jq .token
+bash deploy/runner-setup.sh --token <that token>
+```
+
+The runner is outbound-only — nothing exposed, no ports forwarded. The 10-minute
+polling timer stays enabled as a backstop; both paths call `git-autorebuild.sh`,
+which no-ops when already current, so they can't fight.
+
+**`.github/workflows/deploy.yml` must stay `push`-only.** The runner executes
+workflow code on a machine inside the house and this repo is public, so a
+`pull_request` trigger would hand strangers code execution on the Pi. Push events
+require write access; that's the whole protection.
+
+Deploys are gated on `tests/api_checks.py`, run *before* the restart — so a commit
+that fails leaves the wall serving the previous code rather than breaking it.
