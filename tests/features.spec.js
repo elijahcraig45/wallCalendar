@@ -30,8 +30,14 @@ for (const vp of VIEWPORTS) {
   test.describe(`new pages ${vp.name}`, () => {
     test.use({ viewport: { width: vp.width, height: vp.height } });
 
-    test("every page renders clean in the shell", async ({ page }) => {
-      for (const target of ["/today", "/recipes"]) {
+    /* A fresh tab per page, deliberately. Walking all three with one `page` made
+       this flaky: navigating away cancels whatever fetch the previous page had in
+       flight, Chromium logs that as a console error, and the listener belonging to
+       the NEXT page catches it - a failure with nothing wrong with the page named
+       in the message. Error listeners also accumulated across iterations. */
+    test("every page renders clean in the shell", async ({ context }) => {
+      for (const target of ["/today", "/weather", "/recipes"]) {
+        const page = await context.newPage();
         const problems = [];
         page.on("pageerror", (e) => problems.push(`${target} pageerror: ${e.message}`));
         page.on("console", (m) => {
@@ -39,8 +45,9 @@ for (const vp of VIEWPORTS) {
         });
         await page.goto(target);
         await page.waitForTimeout(1200);
-        // 6 destinations; the rail has to still fit a 600px panel.
-        await expect(page.locator(".rail-item")).toHaveCount(6);
+        // 7 destinations now that Weather has its own page; the rail still has
+        // to fit a 600px panel, which is what the overflow check below is for.
+        await expect(page.locator(".rail-item")).toHaveCount(7);
         const railFits = await page.evaluate(() => {
           const rail = document.getElementById("rail");
           return rail.scrollHeight <= rail.clientHeight + 1;
@@ -49,6 +56,7 @@ for (const vp of VIEWPORTS) {
         await expectNoSidewaysScroll(page, target);
         expect(problems, `errors on ${target}`).toEqual([]);
         await shoot(page, `feat-${vp.name}-${target.slice(1)}`);
+        await page.close();
       }
     });
   });
@@ -429,7 +437,7 @@ test.describe("light-theme contrast sweep", () => {
 
   const findOffenders = (page) => page.evaluate(measure);
 
-  for (const target of ["/", "/today", "/recipes", "/browser", "/accounts", "/spotify"]) {
+  for (const target of ["/", "/today", "/weather", "/recipes", "/browser", "/accounts", "/spotify"]) {
     test(`no unreadable text on ${target}`, async ({ page }) => {
       await page.goto(target);
       await page.waitForTimeout(1600);
@@ -611,3 +619,62 @@ test.describe("light-theme contrast sweep", () => {
     expect(failures, "palettes with unreadable text").toEqual([]);
   });
 });
+
+test.describe("weather page", () => {
+  test.use({ viewport: { width: 1920, height: 1080 } });
+
+  test("shows conditions, the hours, the week and the alerts", async ({ page }) => {
+    await page.goto("/weather");
+    await expect(page.locator(".wx-now-temp")).toHaveText(/^-?\d+°$/);
+
+    // 24 hourly cells and 7 days, from the same fixtures the /today page uses.
+    expect(await page.locator(".wx-hour").count()).toBe(24);
+    expect(await page.locator(".wx-day").count()).toBe(7);
+
+    // The demo fixture carries three alerts, one of them already expired: the
+    // expired one must not be rendered.
+    expect(await page.locator(".wx-alert").count()).toBe(2);
+    expect(await page.locator(".wx-alert--urgent").count()).toBe(1);
+    await expect(page.locator("#wx-alert-count")).toHaveText("2");
+    await expect(page.locator(".wx-alert").first()).toContainText("Severe Thunderstorm Warning");
+    await expect(page.locator("#wx-alerts")).not.toContainText("Flood Advisory");
+    await shoot(page, "weather-page");
+  });
+
+  test("an alert opens to its full text and closes again", async ({ page }) => {
+    await page.goto("/weather");
+    const detail = page.locator('[data-wx-detail="0"]');
+    await expect(detail).toBeHidden();
+
+    await page.locator('[data-wx-alert="0"]').click();
+    await expect(detail).toBeVisible();
+    // The instruction is the part you'd act on, so it has to be in the detail.
+    await expect(detail).toContainText("interior room");
+
+    await page.locator('[data-wx-alert="0"]').click();
+    await expect(detail).toBeHidden();
+  });
+
+  /* The storm outlook must never read as a lightning detector. There is no free
+     strike-level feed - Open-Meteo's lightning_potential is all nulls for US
+     locations - so the page states what it is. */
+  test("the storm outlook says it is a forecast, not a detector", async ({ page }) => {
+    await page.goto("/weather");
+    await expect(page.locator(".wx-thunder-head")).toContainText(/Thunder|No thunder/);
+    await expect(page.locator(".wx-thunder-caveat")).toContainText("not a detector");
+    // CAPE band, from the fixture's 2600 J/kg afternoon.
+    await expect(page.locator(".wx-thunder-cape")).toContainText("CAPE");
+  });
+
+  test("a failing alerts service leaves the rest of the page working", async ({ page }) => {
+    // Alerts are NWS; every number is Open-Meteo. One source failing must not
+    // take the other half of the page down, which is why they are separate calls.
+    await page.route("**/api/weather/alerts", (route) => route.abort());
+    await page.goto("/weather");
+
+    await expect(page.locator(".wx-now-temp")).toHaveText(/^-?\d+°$/);
+    expect(await page.locator(".wx-day").count()).toBe(7);
+    await expect(page.locator("#wx-alerts")).toContainText("Couldn't reach");
+  });
+});
+

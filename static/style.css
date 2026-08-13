@@ -2675,6 +2675,227 @@ textarea.text-input {
   #rail { gap: 2px; }
 }
 
+/* ---------- weather page ---------- */
+
+#wx-view {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  /* Conditions are compact and fixed; the forecast needs the most room; alerts
+     need enough width that a long headline doesn't become a column of single
+     words. */
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr) minmax(300px, 1.4fr);
+  gap: 18px;
+  padding: 16px 18px;
+}
+
+@media (max-width: 1200px) {
+  #wx-view { grid-template-columns: 1fr; overflow-y: auto; }
+}
+
+#wx-view h3 {
+  margin: 0 0 10px;
+  font-size: 0.92rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+#wx-now-col, #wx-forecast-col, #wx-alerts-col {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.wx-updated { font-size: 0.8rem; color: var(--text-dim); margin-right: 10px; }
+.wx-empty { color: var(--text-dim); font-size: 0.9rem; margin: 0; padding: 6px 0; }
+
+.wx-stale {
+  color: #6b4e00;
+  background: #fdf0c8;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 0.8rem;
+  margin: 8px 0 0;
+}
+
+/* conditions now */
+
+#wx-now {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 18px;
+  text-align: center;
+}
+
+.wx-now-icon svg { width: clamp(56px, 9vh, 92px); height: clamp(56px, 9vh, 92px); color: var(--accent); }
+.wx-now-temp { font-size: clamp(2.2rem, 5.5vh, 3.4rem); font-weight: 600; line-height: 1; }
+.wx-now-label { font-size: 1.05rem; margin-top: 4px; }
+.wx-now-place { font-size: 0.82rem; color: var(--text-dim); margin-top: 2px; }
+
+.wx-now-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin: 16px 0 0;
+  text-align: left;
+}
+
+.wx-now-grid dt { font-size: 0.72rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+.wx-now-grid dd { margin: 1px 0 0; font-size: 0.98rem; font-weight: 500; }
+
+/* storm outlook */
+
+.wx-thunder-body {
+  background: var(--surface);
+  border-radius: 12px;
+  padding: 14px 16px;
+  border-left: 4px solid var(--border);
+}
+
+.wx-thunder-body--active { border-left-color: var(--accent); }
+.wx-thunder-head { font-size: 1rem; font-weight: 600; }
+.wx-thunder-cape { font-size: 0.9rem; margin-top: 5px; }
+.wx-thunder-note { font-size: 0.82rem; color: var(--text-dim); margin-top: 2px; }
+
+/* Small, and deliberately always present: it's the difference between a forecast
+   and a detector, and the page should never imply the latter. */
+.wx-thunder-caveat {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  margin-top: 9px;
+  line-height: 1.35;
+}
+
+/* radar */
+
+#wx-radar-block { min-height: 0; display: flex; flex-direction: column; }
+#wx-radar { flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; background: var(--surface); }
+
+.wx-radar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+/* hourly strip */
+
+#wx-hourly {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  /* Touch-scrolled on a wall, so the row must not shrink its cells to fit. */
+  scroll-snap-type: x proximity;
+}
+
+.wx-hour {
+  flex: 0 0 auto;
+  width: 62px;
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 10px 4px;
+  text-align: center;
+  scroll-snap-align: start;
+}
+
+.wx-hour-time { font-size: 0.74rem; color: var(--text-dim); }
+.wx-hour-icon svg { width: 24px; height: 24px; color: var(--accent); margin: 5px 0 2px; }
+.wx-hour-temp { font-size: 0.95rem; font-weight: 600; }
+.wx-hour-precip { font-size: 0.74rem; color: var(--text-dim); min-height: 1em; }
+.wx-hour-precip--likely { color: var(--accent); font-weight: 600; }
+
+/* the week */
+
+#wx-days { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; flex: 1; }
+
+.wx-day {
+  display: grid;
+  grid-template-columns: 58px 30px 42px 40px minmax(60px, 1fr) 40px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+
+.wx-day-name { font-size: 0.9rem; font-weight: 600; }
+.wx-day-icon svg { width: 24px; height: 24px; color: var(--accent); display: block; }
+.wx-day-precip { font-size: 0.78rem; color: var(--text-dim); }
+.wx-day-low, .wx-day-high { font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+.wx-day-low { color: var(--text-dim); text-align: right; }
+.wx-day-high { font-weight: 600; }
+
+/* A low-to-high bar against the week's whole range, so "Thursday is the cold
+   one" reads without comparing seven pairs of numbers. */
+.wx-day-track { position: relative; height: 6px; background: var(--tint); border-radius: 999px; }
+
+.wx-day-bar {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+/* alerts */
+
+#wx-alerts { list-style: none; margin: 0; padding: 0; overflow-y: auto; min-height: 0; flex: 1; }
+
+.wx-count {
+  display: inline-block;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--tint-strong);
+  color: var(--text);
+  font-size: 0.78rem;
+  text-align: center;
+  letter-spacing: 0;
+}
+
+.wx-count--urgent { background: #b3261e; color: #ffffff; }
+
+.wx-alert {
+  background: var(--surface);
+  border-radius: 10px;
+  border-left: 4px solid var(--border);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.wx-alert--urgent { border-left-color: #b3261e; background: #fdecea; }
+
+.wx-alert-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wx-alert-event { font-size: 1rem; font-weight: 600; }
+.wx-alert-when { font-size: 0.78rem; color: var(--text-dim); white-space: nowrap; }
+.wx-alert-area { font-size: 0.78rem; color: var(--text-dim); margin-top: 3px; }
+
+.wx-alert-detail { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 8px; }
+.wx-alert-detail p { margin: 0 0 6px; font-size: 0.85rem; line-height: 1.4; }
+.wx-alert-headline { font-weight: 600; }
+.wx-alert-instruction { color: var(--text); background: var(--tint); border-radius: 8px; padding: 7px 9px; }
+.wx-alert-sender { color: var(--text-dim); font-size: 0.76rem !important; }
+
+#weather-more { display: inline-block; margin-top: 12px; text-decoration: none; }
+
 /* `!important`, and it's the right call for exactly this rule.
 
    .hidden is the one utility the whole app toggles from JavaScript, and source

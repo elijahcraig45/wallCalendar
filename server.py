@@ -7,6 +7,7 @@ from googleapiclient.errors import HttpError
 from spotipy.exceptions import SpotifyException
 
 from app import (
+    alerts_service,
     browser_service,
     calendar_service,
     demo_data,
@@ -455,6 +456,23 @@ def api_weather():
     # get_weather() never raises - weather is decoration and must not be able to
     # take a page down - so there's no error handling to do here.
     return jsonify(weather_service.get_weather())
+
+
+@app.route("/weather")
+def weather_page():
+    return render_template("weather.html")
+
+
+@app.route("/api/weather/alerts")
+def api_weather_alerts():
+    # Same contract as get_weather(): never raises, so a National Weather Service
+    # outage costs you the warnings panel and nothing else on the page.
+    return jsonify(alerts_service.get_alerts())
+
+
+@app.route("/api/weather/radar")
+def api_weather_radar():
+    return jsonify(alerts_service.radar_station())
 
 
 @app.route("/api/browser/probe")

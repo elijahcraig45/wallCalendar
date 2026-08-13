@@ -61,6 +61,11 @@ function renderWeather(data) {
   weatherListeners.forEach((listener) => listener(data));
 }
 
+// Today plus three. The payload now carries a full week for the /weather page,
+// but this is a peek from the header - seven cells in a small overlay is a worse
+// answer than a link to the page with room for them.
+const PANEL_FORECAST_DAYS = 4;
+
 function renderWeatherPanel() {
   const data = currentWeather;
   if (!data) return;
@@ -80,7 +85,10 @@ function renderWeatherPanel() {
   weatherNow.appendChild(hero);
 
   weatherForecast.innerHTML = "";
-  (data.days || []).forEach((day, index) => {
+  // Today plus three. The payload now carries a full week for the /weather page,
+  // but this is a peek from the header - seven cells in a small overlay is a
+  // worse answer than a link to the page that has room for them.
+  (data.days || []).slice(0, PANEL_FORECAST_DAYS).forEach((day, index) => {
     const cell = document.createElement("div");
     cell.className = "forecast-day";
     cell.innerHTML = `

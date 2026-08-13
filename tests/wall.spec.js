@@ -369,8 +369,11 @@ test.describe("weather", () => {
 
     await chip.click();
     await expect(page.locator("#weather-overlay")).toBeVisible();
-    // 4 days: today plus three.
+    // 4 days: today plus three. The payload carries a full week for the /weather
+    // page, and this panel deliberately stays a peek - it links to that page
+    // instead of growing to seven cells in a small overlay.
     await expect(page.locator(".forecast-day")).toHaveCount(4);
+    await expect(page.locator("#weather-more")).toHaveAttribute("href", "/weather");
     // Fixtures deliberately vary the codes, so a single repeated icon means the
     // code-to-icon mapping collapsed.
     const icons = await page.evaluate(() =>

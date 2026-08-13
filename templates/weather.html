@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block topbar %}
+<h1>Weather</h1>
+<div class="topbar-actions">
+  <span id="wx-updated" class="wx-updated"></span>
+  <button id="wx-refresh" class="pill-button" type="button">Refresh</button>
+</div>
+{% endblock %}
+
+{% block content %}
+{# Three columns: conditions now, the hours and days ahead, and warnings.
+   Alerts come from the National Weather Service; every number comes from
+   Open-Meteo. Two separate sources deliberately - an outage at one leaves the
+   other half of the page working. #}
+<div id="wx-view">
+  <section id="wx-now-col">
+    <div id="wx-now"></div>
+    <div id="wx-thunder"></div>
+    <div id="wx-radar-block">
+      <h3>Radar</h3>
+      <div id="wx-radar"></div>
+    </div>
+  </section>
+
+  <section id="wx-forecast-col">
+    <h3>Next 24 hours</h3>
+    <div id="wx-hourly"></div>
+    <h3>The week</h3>
+    <ul id="wx-days"></ul>
+  </section>
+
+  <section id="wx-alerts-col">
+    <h3>Alerts <span id="wx-alert-count" class="wx-count hidden"></span></h3>
+    <ul id="wx-alerts"></ul>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/wxpage.js?v={{ build }}"></script>
+{% endblock %}

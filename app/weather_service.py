@@ -103,6 +103,27 @@ def _parse(payload: dict) -> dict:
                 "precip_chance": day(index, "precipitation_probability_max"),
                 "sunrise": day(index, "sunrise"),
                 "sunset": day(index, "sunset"),
+                "wind_max": _round(day(index, "wind_speed_10m_max")),
+                "uv_max": _round(day(index, "uv_index_max")),
+            }
+        )
+
+    hourly = payload.get("hourly", {})
+    hours = []
+    for index, stamp in enumerate(hourly.get("time", [])):
+        def hour(key, default=None):
+            values = hourly.get(key) or []
+            return values[index] if index < len(values) else default
+
+        hours.append(
+            {
+                "time": stamp,
+                "temperature": _round(hour("temperature_2m")),
+                "feels_like": _round(hour("apparent_temperature")),
+                "precip_chance": hour("precipitation_probability"),
+                "wind": _round(hour("wind_speed_10m")),
+                "cape": _round(hour("cape")),
+                **dict(zip(("label", "icon"), describe(hour("weather_code")))),
             }
         )
 
@@ -120,12 +141,42 @@ def _parse(payload: dict) -> dict:
         "sunrise": days[0]["sunrise"] if days else None,
         "sunset": days[0]["sunset"] if days else None,
         "days": days,
+        "hours": hours,
+        # From NOW, not from the start of the array. The hourly series begins at
+        # local midnight, so slicing from zero asked "was it thundery overnight" -
+        # which for an afternoon-storm climate is exactly the wrong 12 hours.
+        "cape_peak": max(
+            (h["cape"] for h in _next_hours(hours, 12) if h["cape"] is not None),
+            default=None,
+        ),
+        "thunder_hours": [h["time"] for h in _next_hours(hours, 24) if h["icon"] == "storm"],
         "errors": [],
     }
 
 
 def _round(value):
     return None if value is None else round(value)
+
+
+def _next_hours(hours: list[dict], count: int) -> list[dict]:
+    """The next `count` entries at or after the current local hour.
+
+    Open-Meteo's hourly series starts at local midnight and the timestamps carry
+    no offset (timezone=auto already localised them), so they compare directly
+    against a naive local now.
+    """
+    now = dt.datetime.now().replace(minute=0, second=0, microsecond=0)
+    upcoming = []
+    for hour in hours:
+        try:
+            stamp = dt.datetime.fromisoformat(hour["time"])
+        except (ValueError, KeyError):
+            continue
+        if stamp >= now:
+            upcoming.append(hour)
+        if len(upcoming) >= count:
+            break
+    return upcoming
 
 
 def _fetch() -> dict:
@@ -149,9 +200,16 @@ def _fetch_once() -> dict:
             "current": "temperature_2m,relative_humidity_2m,apparent_temperature,"
                        "is_day,precipitation,weather_code,wind_speed_10m",
             "daily": "weather_code,temperature_2m_max,temperature_2m_min,"
-                     "precipitation_probability_max,sunrise,sunset",
+                     "precipitation_probability_max,sunrise,sunset,"
+                     "wind_speed_10m_max,uv_index_max",
+            # CAPE is the honest thunderstorm signal available here: Open-Meteo
+            # accepts `lightning_potential` but returns all nulls for US
+            # locations, so instability plus the WMO thunder codes is what there
+            # is. Actual strike proximity needs a commercial feed.
+            "hourly": "temperature_2m,precipitation_probability,weather_code,"
+                      "apparent_temperature,wind_speed_10m,cape",
             "timezone": "auto",
-            "forecast_days": 4,
+            "forecast_days": 7,
             "temperature_unit": "fahrenheit",
             "wind_speed_unit": "mph",
             "precipitation_unit": "inch",
