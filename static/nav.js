@@ -120,33 +120,35 @@ setInterval(refreshNowPlaying, railChipWanted ? 20000 : 5000);
    all sat on the default blue while the calendar was amber - which reads as a
    bug rather than a theme. calendar.js still calls this with whatever month is
    being browsed. */
+/* Each month carries its accent twice: as a hex string for `--accent`, and as
+   space-separated RGB components for `--accent-rgb`, which lets the stylesheet
+   derive any alpha it needs with rgb(var(--accent-rgb) / 0.14). Without that,
+   themed translucent surfaces would need a hardcoded rgba() per month. */
 const MONTH_THEMES = [
-  { accent: "#7aa2d6", wash: "rgba(122, 162, 214, 0.05)" }, // Jan - cold light
-  { accent: "#c98bb0", wash: "rgba(201, 139, 176, 0.05)" }, // Feb
-  { accent: "#6fae7c", wash: "rgba(111, 174, 124, 0.05)" }, // Mar - first green
-  { accent: "#7bbf6a", wash: "rgba(123, 191, 106, 0.06)" }, // Apr
-  { accent: "#9ac45c", wash: "rgba(154, 196, 92, 0.06)" },  // May
-  { accent: "#4fb3a6", wash: "rgba(79, 179, 166, 0.06)" },  // Jun
-  { accent: "#e8a33d", wash: "rgba(232, 163, 61, 0.06)" },  // Jul - high summer
-  { accent: "#e0873c", wash: "rgba(224, 135, 60, 0.06)" },  // Aug
-  { accent: "#c9772f", wash: "rgba(201, 119, 47, 0.06)" },  // Sep
-  { accent: "#d2652f", wash: "rgba(210, 101, 47, 0.07)" },  // Oct
-  { accent: "#a8613f", wash: "rgba(168, 97, 63, 0.06)" },   // Nov
-  { accent: "#5f93c4", wash: "rgba(95, 147, 196, 0.05)" },  // Dec
+  { accent: "#7aa2d6", rgb: "122 162 214" },  // Jan - cold light
+  { accent: "#c98bb0", rgb: "201 139 176" },  // Feb
+  { accent: "#6fae7c", rgb: "111 174 124" },  // Mar - first green
+  { accent: "#7bbf6a", rgb: "123 191 106" },  // Apr
+  { accent: "#9ac45c", rgb: "154 196 92" },   // May
+  { accent: "#4fb3a6", rgb: "79 179 166" },   // Jun
+  { accent: "#e8a33d", rgb: "232 163 61" },   // Jul - high summer
+  { accent: "#e0873c", rgb: "224 135 60" },   // Aug
+  { accent: "#c9772f", rgb: "201 119 47" },   // Sep
+  { accent: "#d2652f", rgb: "210 101 47" },   // Oct
+  { accent: "#a8613f", rgb: "168 97 63" },    // Nov
+  { accent: "#5f93c4", rgb: "95 147 196" },   // Dec
 ];
 
 const DEFAULT_ACCENT = "#4285F4";
+const DEFAULT_ACCENT_RGB = "66 133 244";
 
 function applyMonthTheme(monthNumber) {
   const root = document.documentElement;
-  if (localStorage.getItem("calendar_themes") === "off") {
-    root.style.setProperty("--accent", DEFAULT_ACCENT);
-    root.style.setProperty("--month-wash", "transparent");
-    return;
-  }
+  const off = localStorage.getItem("calendar_themes") === "off";
   const theme = MONTH_THEMES[(monthNumber - 1) % 12];
-  root.style.setProperty("--accent", theme.accent);
-  root.style.setProperty("--month-wash", theme.wash);
+  root.style.setProperty("--accent", off ? DEFAULT_ACCENT : theme.accent);
+  root.style.setProperty("--accent-rgb", off ? DEFAULT_ACCENT_RGB : theme.rgb);
+  root.dataset.themed = off ? "off" : "on";
 }
 
 // Whatever month it is right now, before any page-specific script runs.

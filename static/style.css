@@ -23,9 +23,10 @@
      minimum when the day's range is too wide to fit. */
   --hour-height: 30px;
   --gutter-width: 54px;
-  /* Set per month by calendar.js. A wash this faint is the whole seasonal effect
-     on the background; the accent carries the rest. */
-  --month-wash: transparent;
+  /* Set per month by nav.js: the accent's RGB components, so any rule below can
+     derive a translucent tint of the current month's colour. Defaults to the
+     Google blue in case a page renders before the script runs. */
+  --accent-rgb: 66 133 244;
 }
 
 /* 1024x600 (official Pi 7" DSI) - the tightest target. */
@@ -2025,11 +2026,58 @@ textarea.text-input {
   line-height: 44px;
 }
 
-/* ---------- monthly theme wash ---------- */
+/* ---------- monthly theme ----------
+   The first version of this changed the accent and a 6%-alpha wash, and nothing
+   else. Measured on the wall, that painted 900 of 1,906,560 pixels - 0.05% of the
+   screen - because every event bar carries its owner's colour, not the theme. It
+   was invisible from a chair, which is the only place it gets looked at.
 
-/* Applied to the stage rather than body so the rail stays neutral - a tinted rail
-   would fight the accent rather than support it. */
-#stage { background-image: linear-gradient(var(--month-wash), var(--month-wash)); }
+   So the theme now colours the *chrome*: the header, the weekday strip, today's
+   cell and a perceptible wash. Text colour, contrast and event colours are still
+   untouched, which was the right instinct - just applied to almost nothing. */
+
+#stage {
+  background-image: linear-gradient(
+    160deg,
+    rgb(var(--accent-rgb) / 0.13) 0%,
+    rgb(var(--accent-rgb) / 0.04) 55%,
+    rgb(var(--accent-rgb) / 0.09) 100%
+  );
+}
+
+/* The largest single themed surface, and the one at eye level. */
+#top-bar {
+  background-image: linear-gradient(
+    90deg,
+    rgb(var(--accent-rgb) / 0.20) 0%,
+    rgb(var(--accent-rgb) / 0.06) 60%,
+    rgb(var(--accent-rgb) / 0.12) 100%
+  );
+  border-bottom-color: rgb(var(--accent-rgb) / 0.45);
+}
+
+/* Sun..Sat reads as a label row, so tinting it costs no legibility and gives the
+   month an unmistakable colour across the full width. */
+#weekday-row {
+  color: rgb(var(--accent-rgb) / 0.92);
+  background: rgb(var(--accent-rgb) / 0.10);
+  border-bottom: 2px solid rgb(var(--accent-rgb) / 0.5);
+  font-weight: 600;
+}
+
+/* Today was previously a ~30px circle. The whole cell now carries the tint, which
+   is what makes "where is today" answerable from across the room. */
+.day-cell.today {
+  background:
+    linear-gradient(rgb(var(--accent-rgb) / 0.16), rgb(var(--accent-rgb) / 0.16)),
+    var(--surface-hi);
+  box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / 0.55);
+}
+
+/* The rail's active item and the time grid's today column, for the same reason. */
+.rail-item.active { background: rgb(var(--accent-rgb) / 0.18); }
+.timegrid-col.today { background: rgb(var(--accent-rgb) / 0.10); }
+.timegrid-day-head.today { background: rgb(var(--accent-rgb) / 0.14); }
 
 /* ---------- night dimming ---------- */
 
