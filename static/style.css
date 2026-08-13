@@ -7,12 +7,16 @@
      careful low-contrast tint read as muddy brown haze. It also fought the event
      colours: Google's palette is light pastel chips with dark text, designed for
      a light background. themes.js can still define a dark palette for night. */
-  --bg: #f4f1ec;          /* the room-facing ground: warm off-white, not clinical */
+  /* The paper is near-neutral, and that's the second correction. A warm cream
+     ground plus a warm accent (August's is burnt orange) is still the brown
+     family, just a lighter one - on the wall it read as a stain rather than as
+     paper. The month's character comes from its accent; the ground stays quiet. */
+  --bg: #f4f5f7;          /* the room-facing ground: off-white, barely cool */
   --surface: #ffffff;     /* day cells, panels, cards */
-  --surface-hi: #fbf7f0;  /* today, hovered/active surfaces */
-  --border: #e2dcd2;      /* hairline grid and dividers */
-  --text: #22201d;
-  --text-dim: #6f6a63;
+  --surface-hi: #f8f9fb;  /* hovered/active surfaces */
+  --border: #e3e6ea;      /* hairline grid and dividers */
+  --text: #1f2124;
+  --text-dim: #6b6f76;
   --accent: #4285F4;
   --on-accent: #ffffff;   /* text that sits directly on the accent */
   /* Neutral overlay used for faint fills, so they work on light or dark grounds
@@ -563,11 +567,6 @@ html {
 .day-cell.outside-month .event-pill { opacity: 0.4; }
 
 /* Today is the one place the accent is unmistakable, which is all it needs. */
-.day-cell.today {
-  background: rgb(var(--accent-rgb) / calc(0.10 * var(--theme-strength)));
-  box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / calc(0.9 * var(--theme-strength)));
-}
-
 .day-cell.today .day-number {
   background: var(--accent);
   color: var(--on-accent);
@@ -2171,12 +2170,15 @@ textarea.text-input {
   font-size: 0.72rem;
 }
 
-/* Today was previously a ~30px circle. The whole cell now carries the tint, which
-   is what makes "where is today" answerable from across the room. */
-/* Today is the one place the accent is unmistakable, which is all it needs. */
+/* Today was previously a ~30px circle; the whole cell now carries it, which is
+   what makes "where is today" answerable from across the room.
+   The fill is deliberately faint. At 10% it was the heaviest thing on the wall -
+   a tall tan block, since a warm accent at that strength over white reads as a
+   stain rather than a highlight. The ring and the filled date badge do the work;
+   the wash only has to say "this column". */
 .day-cell.today {
-  background: rgb(var(--accent-rgb) / calc(0.10 * var(--theme-strength)));
-  box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / calc(0.9 * var(--theme-strength)));
+  background: rgb(var(--accent-rgb) / calc(0.055 * var(--theme-strength)));
+  box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / calc(0.85 * var(--theme-strength)));
 }
 
 /* The rail's active item and the time grid's today column, for the same reason. */

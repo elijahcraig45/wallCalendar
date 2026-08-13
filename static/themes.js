@@ -21,11 +21,11 @@
      {
        name:    "August — heat",  // for your reference only
        accent:  "#c2662c",        // REQUIRED
-       base:    "#f7f1ea",        // the room-facing ground
+       base:    "#f7f4ef",        // the room-facing ground
        surface: "#ffffff",        // day cells, panels, cards
-       lines:   "#ecdfd2",        // the hairline grid
-       text:    "#22201d",        // body text
-       textDim: "#6f6a63",        // labels and secondary text
+       lines:   "#ebe4db",        // the hairline grid
+       text:    "#1f2124",        // body text
+       textDim: "#6b6f76",        // labels and secondary text
        strength: 1.0,             // how strongly the accent tints things
      }
 
@@ -95,17 +95,20 @@
      saturated. Pale accents disappear; near-black ones stop reading as a colour.
    - `lines` too faint and the grid dissolves; too dark and it looks like a
      spreadsheet. Around 10-15% darker than `surface` is the useful range.
+   - Keep `base` close to neutral. A warm cream ground under a warm accent is
+     still the brown family, and on the wall it reads as a stain rather than as
+     paper. Let the accent carry the month; the ground should be almost unnoticed.
    ========================================================================== */
 
 /* Copy this whole block, rename it, change the colours. */
 const THEME_TEMPLATE = {
   name: "Template — copy me",
   accent: "#4f86c6",     // required: today, active rail, the header rule
-  base: "#f4f1ec",       // the room-facing ground
+  base: "#f4f5f7",       // the room-facing ground
   surface: "#ffffff",    // day cells, panels, cards
-  lines: "#e2dcd2",      // hairline grid
-  text: "#22201d",       // body text
-  textDim: "#6f6a63",    // labels, secondary text
+  lines: "#e3e6ea",      // hairline grid
+  text: "#1f2124",       // body text
+  textDim: "#6b6f76",    // labels, secondary text
   strength: 1.0,         // 0 = no accent tinting, 1 = default
 };
 
@@ -119,18 +122,18 @@ const THEME_TEMPLATE = {
    enough that August isn't February, not so much that it looks like a different
    app. The accent shows up on today, the header rule and the active rail item. */
 const MONTHLY_THEMES = [
-  { name: "January — cold light",   accent: "#5b7fa8", base: "#f0f2f5", surface: "#ffffff", lines: "#dde2e8" },
-  { name: "February — late winter", accent: "#a3628a", base: "#f5f0f3", surface: "#ffffff", lines: "#e6dce2" },
-  { name: "March — first green",    accent: "#4f8a63", base: "#f0f4f0", surface: "#ffffff", lines: "#dde6dd" },
-  { name: "April — spring",         accent: "#5d9a4e", base: "#f2f5ef", surface: "#ffffff", lines: "#e0e7db" },
-  { name: "May — full leaf",        accent: "#6f9a3a", base: "#f4f5ec", surface: "#ffffff", lines: "#e4e7d8" },
-  { name: "June — midsummer",       accent: "#2f8f86", base: "#eef4f3", surface: "#ffffff", lines: "#d9e6e4" },
-  { name: "July — high summer",     accent: "#c07a1e", base: "#f7f2e8", surface: "#ffffff", lines: "#ebe1cf" },
-  { name: "August — heat",          accent: "#c2662c", base: "#f7f1ea", surface: "#ffffff", lines: "#ecdfd2" },
-  { name: "September — turning",    accent: "#b05f26", base: "#f6f0e9", surface: "#ffffff", lines: "#eaddd0" },
-  { name: "October — rust",         accent: "#b4501f", base: "#f7eee8", surface: "#ffffff", lines: "#ecd9cd" },
-  { name: "November — bare",        accent: "#8d5334", base: "#f4efea", surface: "#ffffff", lines: "#e6dbd1" },
-  { name: "December — cold blue",   accent: "#41709e", base: "#eff2f6", surface: "#ffffff", lines: "#dbe2ea" },
+  { name: "January — cold light",   accent: "#5b7fa8", base: "#f3f5f7", surface: "#ffffff", lines: "#e3e7ec" },
+  { name: "February — late winter", accent: "#a3628a", base: "#f6f3f5", surface: "#ffffff", lines: "#e9e2e7" },
+  { name: "March — first green",    accent: "#4f8a63", base: "#f3f6f3", surface: "#ffffff", lines: "#e3e9e3" },
+  { name: "April — spring",         accent: "#5d9a4e", base: "#f4f6f2", surface: "#ffffff", lines: "#e5eae1" },
+  { name: "May — full leaf",        accent: "#6f9a3a", base: "#f5f6f1", surface: "#ffffff", lines: "#e7eae0" },
+  { name: "June — midsummer",       accent: "#2f8f86", base: "#f1f6f5", surface: "#ffffff", lines: "#e0eae8" },
+  { name: "July — high summer",     accent: "#b8791f", base: "#f7f5ef", surface: "#ffffff", lines: "#eae5da" },
+  { name: "August — heat",          accent: "#c2662c", base: "#f7f4ef", surface: "#ffffff", lines: "#ebe4db" },
+  { name: "September — turning",    accent: "#a85f2a", base: "#f6f4f0", surface: "#ffffff", lines: "#eae2d9" },
+  { name: "October — rust",         accent: "#a8501f", base: "#f7f3f0", surface: "#ffffff", lines: "#ebdfd7" },
+  { name: "November — bare",        accent: "#8d5334", base: "#f5f3f0", surface: "#ffffff", lines: "#e8e0d9" },
+  { name: "December — cold blue",   accent: "#41709e", base: "#f2f4f7", surface: "#ffffff", lines: "#e1e6ec" },
 ];
 
 /* Kept for after dark, or if you simply prefer it. Pin it with:
@@ -155,11 +158,11 @@ const NIGHT_THEME = {
 const THEME_OFF = {
   name: "off",
   accent: "#4285F4",
-  base: "#f4f1ec",
+  base: "#f4f5f7",
   surface: "#ffffff",
-  lines: "#e2dcd2",
-  text: "#22201d",
-  textDim: "#6f6a63",
+  lines: "#e3e6ea",
+  text: "#1f2124",
+  textDim: "#6b6f76",
   strength: 0,
 };
 
@@ -204,8 +207,8 @@ function resolveTheme(theme) {
     base,
     surface,
     lines: theme.lines || mix(surface, isDark ? "#ffffff" : "#000000", 0.12),
-    text: theme.text || (isDark ? "#f0f0f0" : "#22201d"),
-    textDim: theme.textDim || (isDark ? "#8a8f9c" : "#6f6a63"),
+    text: theme.text || (isDark ? "#f0f0f0" : "#1f2124"),
+    textDim: theme.textDim || (isDark ? "#8a8f9c" : "#6b6f76"),
     // Faint fills have to darken a light ground and lighten a dark one.
     tint: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
     tintStrong: isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)",
