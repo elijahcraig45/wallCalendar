@@ -31,7 +31,7 @@ for (const vp of VIEWPORTS) {
     test.use({ viewport: { width: vp.width, height: vp.height } });
 
     test("every page renders clean in the shell", async ({ page }) => {
-      for (const target of ["/today", "/notes", "/recipes"]) {
+      for (const target of ["/today", "/recipes"]) {
         const problems = [];
         page.on("pageerror", (e) => problems.push(`${target} pageerror: ${e.message}`));
         page.on("console", (m) => {
@@ -39,8 +39,8 @@ for (const vp of VIEWPORTS) {
         });
         await page.goto(target);
         await page.waitForTimeout(1200);
-        // 7 destinations now; the rail has to still fit a 600px panel.
-        await expect(page.locator(".rail-item")).toHaveCount(7);
+        // 6 destinations; the rail has to still fit a 600px panel.
+        await expect(page.locator(".rail-item")).toHaveCount(6);
         const railFits = await page.evaluate(() => {
           const rail = document.getElementById("rail");
           return rail.scrollHeight <= rail.clientHeight + 1;
@@ -62,45 +62,12 @@ test.describe("today overview", () => {
     await expect(page.locator(".today-weather-temp")).toHaveText(/^-?\d+°$/);
     // The fixtures put 9 events on today.
     expect(await page.locator("#today-events .today-event").count()).toBeGreaterThan(4);
-    expect(await page.locator("#today-notes .today-note").count()).toBeGreaterThan(1);
     expect(await page.locator("#today-next .today-event").count()).toBeGreaterThan(1);
 
     // Past events are dimmed rather than dropped - "did I miss it" is a question
     // people ask the wall.
     const dimmed = await page.locator(".today-event--past").count();
     expect(dimmed, "nothing marked past despite morning fixtures").toBeGreaterThan(0);
-  });
-});
-
-test.describe("notes", () => {
-  test.use({ viewport: { width: 1280, height: 800 } });
-
-  test("adds, completes and deletes", async ({ page }) => {
-    await page.goto("/notes");
-    await expect(page.locator(".note-row").first()).toBeVisible();
-    const before = await page.locator(".note-row").count();
-
-    const title = `Test note ${Date.now()}`;
-    await page.fill("#note-input", title);
-    await page.press("#note-input", "Enter");
-    // New note is newest-updated, so it leads the open items.
-    await expect(page.locator(".note-text").first()).toHaveText(new RegExp(title));
-    expect(await page.locator(".note-row").count()).toBe(before + 1);
-
-    // Completing must strike it through, not just record a flag.
-    const row = page.locator(".note-row").first();
-    await row.locator(".note-check").click();
-    await expect.poll(async () =>
-      page.evaluate((text) => {
-        const el = [...document.querySelectorAll(".note-row")]
-          .find((r) => r.textContent.includes(text));
-        return el ? getComputedStyle(el.querySelector(".note-text")).textDecorationLine : "none";
-      }, title)
-    ).toContain("line-through");
-
-    const afterComplete = await page.locator(".note-row").count();
-    await page.locator(".note-row", { hasText: title }).locator(".note-delete").click();
-    await expect.poll(() => page.locator(".note-row").count()).toBe(afterComplete - 1);
   });
 });
 

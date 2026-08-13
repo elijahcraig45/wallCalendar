@@ -20,13 +20,6 @@ GOOGLE_SCOPES = [
     # requested explicitly because Google adds it server-side regardless;
     # omitting it here causes oauthlib to reject the granted-scope mismatch.
     "openid",
-    # Notes. Google Keep has no consumer API (Workspace-only, service account
-    # with domain-wide delegation), so notes are Google Tasks - which shows them
-    # on phones in the Tasks app and inside Google Calendar. Tokens issued before
-    # this scope existed keep working for the calendar and are refused by the
-    # Tasks API until the account is reconnected once; tasks_service turns that
-    # into an explained state rather than an error.
-    "https://www.googleapis.com/auth/tasks",
 ]
 
 SPOTIFY_CLIENT_ID = os.environ.get("SPOTIFY_CLIENT_ID")

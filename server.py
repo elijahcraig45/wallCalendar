@@ -13,7 +13,6 @@ from app import (
     preferences,
     recipes_service,
     spotify_service,
-    tasks_service,
     weather_service,
 )
 from app.auth import google_auth
@@ -436,46 +435,9 @@ def recipes_page():
     return render_template("recipes.html")
 
 
-@app.route("/notes")
-def notes_page():
-    return render_template("notes.html")
-
-
 @app.route("/api/recipes")
 def api_recipes():
     return jsonify(recipes_service.get_recipes())
-
-
-@app.route("/api/notes")
-def api_notes():
-    return jsonify(tasks_service.get_notes())
-
-
-@app.route("/api/notes/add", methods=["POST"])
-def api_notes_add():
-    data = request.json or {}
-    return jsonify(tasks_service.add_note(data.get("title", ""), data.get("notes")))
-
-
-@app.route("/api/notes/<task_id>/done", methods=["POST"])
-def api_notes_done(task_id):
-    return jsonify(tasks_service.set_done(task_id, bool((request.json or {}).get("done"))))
-
-
-@app.route("/api/notes/<task_id>/delete", methods=["POST"])
-def api_notes_delete(task_id):
-    tasks_service.delete_note(task_id)
-    return jsonify({"ok": True})
-
-
-@app.errorhandler(tasks_service.TasksNotAuthorized)
-def handle_tasks_not_authorized(e):
-    return jsonify({"error": str(e), "needs_reauth": True}), 403
-
-
-@app.errorhandler(tasks_service.TasksUnavailable)
-def handle_tasks_unavailable(e):
-    return jsonify({"error": str(e)}), 503
 
 
 @app.route("/api/weather")

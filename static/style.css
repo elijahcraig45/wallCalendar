@@ -2402,7 +2402,7 @@ textarea.text-input {
   flex: 1;
 }
 
-#today-secondary { display: grid; grid-template-rows: 1fr 1fr; gap: 18px; min-height: 0; }
+#today-secondary { display: grid; grid-template-rows: 1fr; gap: 18px; min-height: 0; }
 
 .today-event {
   border-left: 4px solid var(--accent);

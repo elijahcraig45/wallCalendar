@@ -4,7 +4,7 @@ A touchscreen wall calendar for a Raspberry Pi 5 (**landscape mount**): shared
 Google Calendar view plus Spotify control. Runs as a local Flask app, meant to be
 opened full-screen in a kiosk browser.
 
-The shell is a persistent left rail — Calendar / Music / Web / Accounts — so every
+The shell is a persistent left rail — Today / Calendar / Recipes / Music / Web / Accounts — so every
 destination is one tap from anywhere. It replaced a hamburger drawer, which cost
 two taps and hid where you could go.
 
@@ -12,9 +12,8 @@ two taps and hid where you could go.
 
 | Destination | What it does |
 |---|---|
-| **Today** | The morning screen: weather, today's schedule, the notes list, and the next few days. Composed purely from the other endpoints, so it can't disagree with them. |
+| **Today** | The morning screen: weather, today's schedule, and the next few days. Composed purely from the other endpoints, so it can't disagree with them. |
 | **Calendar** | Day / Week / Month / Agenda (see below) |
-| **Notes** | A shared list backed by **Google Tasks**, so it's on everyone's phone in the Tasks app and inside Google Calendar |
 | **Recipes** | Your own Daisy's Kitchen library, read straight from its Firestore, with a hands-free cooking mode |
 | **Music** | Spotify (see Music, below) |
 | **Web** | A framed browser that cannot strand the wall |
@@ -29,17 +28,19 @@ Open-Meteo — no API key, no account, nothing to expire. Set `WALLCAL_LAT`,
 `WALLCAL_LON` and `WALLCAL_PLACE` in `.env`; it defaults to Atlanta. It also
 supplies the real sunrise/sunset that night dimming keys off.
 
-### Notes — why Tasks and not Keep
+### Notes — removed for now
 
-Google Keep has **no consumer API**: it's Workspace-only and needs a service
-account with domain-wide delegation, so a personal account cannot use it at all.
-Google Tasks is the equivalent that does work, satisfies the actual requirement
-(it's on your phone), and reuses the OAuth already here.
+Notes was built on **Google Tasks** and then taken back out: it wasn't good enough
+to keep on the wall. The work is in git rather than deleted - bring it back with
+`git revert <the removal commit>`, or cherry-pick the pieces.
 
-It needs one added scope, so **an account signed in before this existed must be
-reconnected once** — `python cli.py google`, or the Reconnect button the Notes
-page shows. Until then Notes explains exactly that instead of failing obscurely;
-the calendar is unaffected.
+Worth recording so it isn't rediscovered: **Google Keep cannot be used.** Its API is
+Workspace-only, needs a service account with domain-wide delegation, and is
+unavailable to personal accounts. Tasks was the consumer-account substitute, and it
+does put notes on your phone in the Tasks app and inside Google Calendar - the
+mechanism was fine, the wall-side experience wasn't. Reinstating it needs the
+`auth/tasks` scope back in `GOOGLE_SCOPES` plus a one-time `python cli.py google`
+re-consent.
 
 ### Recipes
 
@@ -71,9 +72,14 @@ to 22:00–06:00 when weather is unavailable.
 
 ### Monthly themes
 
-The accent colour and a very faint background wash change with the month. Text
-colour, contrast and type never move — this is read from across a room. Turn it off
-with `localStorage.calendar_themes = "off"`.
+The month's colour runs through the chrome: the header bar, the Sun–Sat strip,
+today's cell, the rail's active item and the time grid's today column. Text colour,
+contrast, type and event colours never move — events carry their owner's colour, not
+the theme's. Turn it off with `localStorage.calendar_themes = "off"`.
+
+The first attempt changed only the accent and a 6%-alpha wash, which measured out at
+900 of 1,906,560 pixels — 0.05% of the screen — and was invisible from a chair. If
+you tighten this again, check it on the wall, not in a browser a foot from your face.
 
 ## Views
 

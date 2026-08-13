@@ -121,7 +121,7 @@ def check_no_global_script_collisions():
 
     static = pathlib.Path(__file__).resolve().parent.parent / "static"
     shell = ["panel.js", "weather.js", "nav.js", "timers.js"]
-    pages = ["calendar.js", "spotify.js", "notes.js", "recipes.js", "today.js",
+    pages = ["calendar.js", "spotify.js", "recipes.js", "today.js",
              "browser.js", "accounts.js"]
     patterns = (
         re.compile(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\("),

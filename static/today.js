@@ -1,7 +1,7 @@
 /* The morning overview.
  *
  * Deliberately built only from endpoints that already exist - today's events, the
- * agenda, weather, notes. It introduces no server-side view of its own, so it
+ * agenda and weather. It introduces no server-side view of its own, so it
  * can't disagree with the pages it summarises, and anything fixed there is fixed
  * here too.
  */
@@ -9,7 +9,6 @@
 const heading = document.getElementById("today-heading");
 const weatherBlock = document.getElementById("today-weather");
 const eventsList = document.getElementById("today-events");
-const notesList = document.getElementById("today-notes");
 const nextList = document.getElementById("today-next");
 
 function todayIso() {
@@ -131,41 +130,9 @@ async function loadUpcoming() {
   }
 }
 
-async function loadNotes() {
-  try {
-    const resp = await fetch("/api/notes");
-    const data = await resp.json();
-    notesList.innerHTML = "";
-
-    if (data.available === false) {
-      const li = document.createElement("li");
-      li.className = "today-empty";
-      li.innerHTML = `${escapeText(data.errors[0] || "Notes unavailable")} <a href="/notes">Set up</a>`;
-      notesList.appendChild(li);
-      return;
-    }
-
-    const open = data.notes.filter((note) => !note.done).slice(0, 6);
-    if (open.length === 0) {
-      empty(notesList, "The list is clear.");
-      return;
-    }
-    open.forEach((note) => {
-      const li = document.createElement("li");
-      li.className = "today-note";
-      li.textContent = note.title;
-      notesList.appendChild(li);
-    });
-  } catch (e) {
-    notesList.innerHTML = "";
-    empty(notesList, "Couldn't load notes.");
-  }
-}
-
 function refreshAll() {
   loadToday();
   loadUpcoming();
-  loadNotes();
 }
 
 refreshAll();
