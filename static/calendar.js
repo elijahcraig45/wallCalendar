@@ -10,13 +10,25 @@ let month = parseInt(view.dataset.month, 10);
 const monthLabel = document.getElementById("month-label");
 const monthGrid = document.getElementById("month-grid");
 const weekdayRow = document.getElementById("weekday-row");
-const weekView = document.getElementById("week-view");
 const agendaView = document.getElementById("agenda-view");
+const noAccounts = document.getElementById("no-accounts");
+const staleBadge = document.getElementById("stale-badge");
 const prevBtn = document.getElementById("prev-month");
 const nextBtn = document.getElementById("next-month");
 const overlay = document.getElementById("day-overlay");
 const overlayDate = document.getElementById("day-overlay-date");
 const overlayEvents = document.getElementById("day-overlay-events");
+
+const timegrid = document.getElementById("timegrid");
+const timegridWrap = document.getElementById("timegrid-wrap");
+const dayDetail = document.getElementById("day-detail");
+const dayDetailHeader = document.getElementById("day-detail-header");
+const dayDetailList = document.getElementById("day-detail-list");
+const timegridHeadDays = document.getElementById("timegrid-head-days");
+const timegridAllDayCols = document.getElementById("timegrid-allday-cols");
+const timegridScroll = document.getElementById("timegrid-scroll");
+const timegridGutter = document.getElementById("timegrid-gutter");
+const timegridCols = document.getElementById("timegrid-cols");
 
 function todayIso() {
   const now = new Date();
@@ -29,10 +41,12 @@ function addDaysIso(iso, delta) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/* ---------- view switcher (month / week / agenda) ---------- */
+/* ---------- view switcher (day / week / month / agenda) ---------- */
 
 let currentView = localStorage.getItem("calendar_view") || "month";
-let weekAnchor = todayIso();
+// One anchor date drives both day and week - switching between them keeps you
+// on the same date rather than snapping back to today.
+let dayAnchor = todayIso();
 
 function applyViewVisibility() {
   document.querySelectorAll(".view-tab").forEach((tab) => {
@@ -40,7 +54,8 @@ function applyViewVisibility() {
   });
   weekdayRow.classList.toggle("hidden", currentView !== "month");
   monthGrid.classList.toggle("hidden", currentView !== "month");
-  weekView.classList.toggle("hidden", currentView !== "week");
+  timegridWrap.classList.toggle("hidden", currentView !== "week" && currentView !== "day");
+  dayDetail.classList.toggle("hidden", currentView !== "day");
   agendaView.classList.toggle("hidden", currentView !== "agenda");
   // Prev/next don't map cleanly onto agenda's rolling forward-looking window.
   prevBtn.classList.toggle("hidden", currentView === "agenda");
@@ -49,53 +64,429 @@ function applyViewVisibility() {
 
 document.querySelectorAll(".view-tab").forEach((tab) => {
   tab.addEventListener("click", () => {
-    currentView = tab.dataset.view;
-    localStorage.setItem("calendar_view", currentView);
-    applyViewVisibility();
-    loadCurrentView();
+    setView(tab.dataset.view);
   });
 });
 
+function setView(next) {
+  currentView = next;
+  localStorage.setItem("calendar_view", currentView);
+  applyViewVisibility();
+  loadCurrentView();
+}
+
 function loadCurrentView() {
+  if (currentView === "day") return loadDay();
   if (currentView === "week") return loadWeek();
   if (currentView === "agenda") return loadAgenda();
   return loadMonth();
 }
 
+/* Every load takes a ticket and only paints if it's still the newest one.
+   Without this, tapping through months faster than the API answers lets a slow
+   response for a month you've left land *after* a faster one and overwrite the
+   screen - the header says August while the grid shows September. Very easy to
+   hit on a Pi over wifi, where a cache-miss month can take seconds. */
+let renderToken = 0;
+
+/* ---------- monthly themes ----------
+   The accent colour and a faint background wash shift with the month, so the wall
+   feels seasonal instead of identical all year. Deliberately limited to those two
+   things: text colour, contrast and type never move, because this is read from
+   across a room and legibility isn't up for negotiation. Set
+   localStorage.calendar_themes = "off" to switch it off. */
+const MONTH_THEMES = [
+  { accent: "#7aa2d6", wash: "rgba(122, 162, 214, 0.05)" }, // Jan - cold light
+  { accent: "#c98bb0", wash: "rgba(201, 139, 176, 0.05)" }, // Feb
+  { accent: "#6fae7c", wash: "rgba(111, 174, 124, 0.05)" }, // Mar - first green
+  { accent: "#7bbf6a", wash: "rgba(123, 191, 106, 0.06)" }, // Apr
+  { accent: "#9ac45c", wash: "rgba(154, 196, 92, 0.06)" },  // May
+  { accent: "#4fb3a6", wash: "rgba(79, 179, 166, 0.06)" },  // Jun
+  { accent: "#e8a33d", wash: "rgba(232, 163, 61, 0.06)" },  // Jul - high summer
+  { accent: "#e0873c", wash: "rgba(224, 135, 60, 0.06)" },  // Aug
+  { accent: "#c9772f", wash: "rgba(201, 119, 47, 0.06)" },  // Sep
+  { accent: "#d2652f", wash: "rgba(210, 101, 47, 0.07)" },  // Oct
+  { accent: "#a8613f", wash: "rgba(168, 97, 63, 0.06)" },   // Nov
+  { accent: "#5f93c4", wash: "rgba(95, 147, 196, 0.05)" },  // Dec
+];
+
+const DEFAULT_ACCENT = "#4285F4";
+
+function applyMonthTheme(monthNumber) {
+  const root = document.documentElement;
+  if (localStorage.getItem("calendar_themes") === "off") {
+    root.style.setProperty("--accent", DEFAULT_ACCENT);
+    root.style.setProperty("--month-wash", "transparent");
+    return;
+  }
+  const theme = MONTH_THEMES[(monthNumber - 1) % 12];
+  root.style.setProperty("--accent", theme.accent);
+  root.style.setProperty("--month-wash", theme.wash);
+}
+
 async function loadMonth() {
+  const token = ++renderToken;
+  applyMonthTheme(month);
   monthLabel.textContent = `${MONTH_NAMES[month - 1]} ${year}`;
   const resp = await fetch(`/api/calendar/${year}/${month}`);
   const grid = await resp.json();
+  if (token !== renderToken) return;
   renderGrid(grid);
   updateAccountErrorBadge(grid.errors || []);
+  updateStaleIndicator(grid);
 }
 
 async function loadWeek() {
-  const [wy, wm, wd] = weekAnchor.split("-").map(Number);
+  const token = ++renderToken;
+  const [wy, wm, wd] = dayAnchor.split("-").map(Number);
   const resp = await fetch(`/api/calendar/week/${wy}/${wm}/${wd}`);
   const data = await resp.json();
+  if (token !== renderToken) return;
   const from = new Date(data.from + "T00:00:00");
   const to = new Date(data.to + "T00:00:00");
   const fmt = { month: "short", day: "numeric" };
+  // Themed by the month the visible week mostly falls in, so a week straddling
+  // two months doesn't flicker between accents as you page through.
+  applyMonthTheme(from.getMonth() + 1);
   monthLabel.textContent = `${from.toLocaleDateString(undefined, fmt)} – ${to.toLocaleDateString(undefined, fmt)}`;
-  renderDayGroups(weekView, data.days, "week-day-row", "week-day-label", "week-day-events", "No events");
+  renderTimeGrid(data.days);
   updateAccountErrorBadge(data.errors || []);
+  updateStaleIndicator(data);
+}
+
+async function loadDay() {
+  const token = ++renderToken;
+  const [dy, dm, dd] = dayAnchor.split("-").map(Number);
+  const resp = await fetch(`/api/calendar/day/${dy}/${dm}/${dd}`);
+  const data = await resp.json();
+  if (token !== renderToken) return;
+  applyMonthTheme(new Date(dayAnchor + "T00:00:00").getMonth() + 1);
+  monthLabel.textContent = new Date(dayAnchor + "T00:00:00").toLocaleDateString(undefined, {
+    weekday: "long", month: "long", day: "numeric",
+  });
+  renderTimeGrid(data.days);
+  renderDayDetail(data.days[0]);
+  updateAccountErrorBadge(data.errors || []);
+  updateStaleIndicator(data);
+}
+
+function renderDayDetail(day) {
+  const events = day ? day.events : [];
+  dayDetailHeader.textContent =
+    events.length === 0 ? "Nothing scheduled" :
+    events.length === 1 ? "1 event" : `${events.length} events`;
+
+  dayDetailList.innerHTML = "";
+  events.forEach((ev) => {
+    const card = renderEventCard(ev);
+    attachEventOpen(card, ev);
+    dayDetailList.appendChild(card);
+  });
+
+  const addRow = document.createElement("li");
+  addRow.className = "event-card add-event-row";
+  addRow.textContent = "+ Add event";
+  addRow.addEventListener("click", () => openAddEventModal(dayAnchor));
+  dayDetailList.appendChild(addRow);
 }
 
 async function loadAgenda() {
+  const token = ++renderToken;
   const resp = await fetch("/api/calendar/agenda?days=30");
   const data = await resp.json();
+  if (token !== renderToken) return;
   monthLabel.textContent = "Next 30 days";
   if (data.days.length === 0) {
     agendaView.innerHTML = "";
     const li = document.createElement("li");
+    li.className = "agenda-day-group";
     li.textContent = "Nothing coming up";
     agendaView.appendChild(li);
   } else {
     renderDayGroups(agendaView, data.days, "agenda-day-group", "agenda-day-header", "agenda-day-events", null);
   }
   updateAccountErrorBadge(data.errors || []);
+  updateStaleIndicator(data);
 }
+
+/* ---------- time grid (week + day) ---------- */
+
+/* The grid shows a window of hours, not a fixed midnight-to-midnight 24. A wall
+   that spends half its height on empty overnight hours is wasting the half of
+   the screen people actually look at, so the window is derived from the events
+   on screen: a waking-hours default, widened whenever something falls outside
+   it. Geometry is recomputed per render and shared by the hour rules, the event
+   blocks and the now-line, so they can't disagree about where 3pm is. */
+const DEFAULT_START_HOUR = 7;
+const DEFAULT_END_HOUR = 22;
+
+let gridStartHour = DEFAULT_START_HOUR;
+let gridEndHour = DEFAULT_END_HOUR;
+let hourHeight = 56;
+
+function minHourHeightPx() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue("--hour-height");
+  return parseFloat(raw) || 56;
+}
+
+function computeGridGeometry(days) {
+  let earliest = DEFAULT_START_HOUR;
+  let latest = DEFAULT_END_HOUR;
+
+  days.forEach((day) => {
+    day.events.forEach((ev) => {
+      if (ev.all_day || !ev.start_iso || !ev.end_iso) return;
+      const { startMin, endMin } = dayMinutes(ev, day.date);
+      earliest = Math.min(earliest, Math.floor(startMin / 60));
+      latest = Math.max(latest, Math.ceil(endMin / 60));
+    });
+  });
+
+  // When today is on screen the window always covers the current hour, so the
+  // now-line is never outside the rendered range (relevant at 2am, where the
+  // events alone would put the window firmly in the daytime).
+  if (days.some((day) => day.date === todayIso())) {
+    const nowHour = new Date().getHours();
+    earliest = Math.min(earliest, nowHour);
+    latest = Math.max(latest, nowHour + 1);
+  }
+
+  gridStartHour = Math.max(0, earliest);
+  gridEndHour = Math.min(24, Math.max(latest, gridStartHour + 6));
+
+  // Stretch the hours to fill the available height when they'll fit, so a
+  // typical week needs no scrolling at all; fall back to a scrollable grid at
+  // the minimum legible hour height when the range is too tall for the panel.
+  const hours = gridEndHour - gridStartHour;
+  const available = timegridScroll.clientHeight;
+  hourHeight = Math.max(minHourHeightPx(), available ? available / hours : 0);
+}
+
+function gridTop(minutes) {
+  return (minutes / 60 - gridStartHour) * hourHeight;
+}
+
+/* Minutes-from-midnight for `ev` as seen from the column for `dateIso`,
+   clamped to that day. Timestamps are parsed with Date rather than sliced out
+   of the ISO string: Google returns each event in its own calendar's UTC
+   offset, and the wall should show every event in the wall's local time. */
+function dayMinutes(ev, dateIso) {
+  const dayStart = new Date(dateIso + "T00:00:00");
+  const startMin = (new Date(ev.start_iso) - dayStart) / 60000;
+  const endMin = (new Date(ev.end_iso) - dayStart) / 60000;
+  const clampedStart = Math.max(0, Math.min(startMin, 24 * 60));
+  const clampedEnd = Math.max(clampedStart, Math.min(endMin, 24 * 60));
+  return { startMin: clampedStart, endMin: clampedEnd };
+}
+
+/* Greedy column packing: events are grouped into clusters that transitively
+   overlap, and within a cluster each event takes the first column whose last
+   event has already ended. Every event in a cluster is then widened to 1/N of
+   the column, so concurrent events sit side by side instead of on top of each
+   other. */
+function layoutOverlaps(items) {
+  const sorted = [...items].sort(
+    (a, b) => a.startMin - b.startMin || b.endMin - a.endMin
+  );
+  let cluster = [];
+  let clusterEnd = -1;
+
+  function flush() {
+    if (cluster.length === 0) return;
+    const colEnds = [];
+    cluster.forEach((item) => {
+      let col = colEnds.findIndex((end) => end <= item.startMin);
+      if (col === -1) {
+        col = colEnds.length;
+        colEnds.push(item.endMin);
+      } else {
+        colEnds[col] = item.endMin;
+      }
+      item.col = col;
+    });
+    cluster.forEach((item) => { item.cols = colEnds.length; });
+    cluster = [];
+  }
+
+  sorted.forEach((item) => {
+    if (cluster.length > 0 && item.startMin >= clusterEnd) flush();
+    cluster.push(item);
+    clusterEnd = cluster.length === 1 ? item.endMin : Math.max(clusterEnd, item.endMin);
+  });
+  flush();
+  return sorted;
+}
+
+const MIN_BLOCK_PX = 24;
+
+function renderTimeGrid(days) {
+  const today = todayIso();
+
+  timegrid.style.setProperty("--day-count", days.length);
+
+  timegridHeadDays.innerHTML = "";
+  timegridAllDayCols.innerHTML = "";
+  timegridGutter.innerHTML = "";
+  timegridCols.innerHTML = "";
+
+  // Pass 1: day headers and the all-day band. This has to happen before the
+  // geometry is measured - the all-day band's height depends on how many
+  // all-day events there are, and measuring the scroll area before it's filled
+  // reports too much room and makes the hour grid overflow the screen.
+  days.forEach((day) => {
+    const date = new Date(day.date + "T00:00:00");
+    const isToday = day.date === today;
+
+    const head = document.createElement("div");
+    head.className = "timegrid-day-head";
+    if (isToday) head.classList.add("today");
+    const weekday = document.createElement("span");
+    weekday.className = "timegrid-day-weekday";
+    weekday.textContent = date.toLocaleDateString(undefined, { weekday: "short" });
+    const num = document.createElement("span");
+    num.className = "timegrid-day-number";
+    num.textContent = date.getDate();
+    head.append(weekday, num);
+    timegridHeadDays.appendChild(head);
+
+    const allDayCol = document.createElement("div");
+    allDayCol.className = "timegrid-allday-col";
+    day.events.filter((ev) => ev.all_day).forEach((ev) => {
+      const pill = document.createElement("div");
+      pill.className = "event-pill";
+      pill.style.background = ev.color;
+      pill.appendChild(pillTitle(ev.title));
+      attachEventOpen(pill, ev);
+      allDayCol.appendChild(pill);
+    });
+    timegridAllDayCols.appendChild(allDayCol);
+  });
+
+  computeGridGeometry(days);
+
+  for (let hour = gridStartHour + 1; hour < gridEndHour; hour += 1) {
+    const label = document.createElement("div");
+    label.className = "hour-label";
+    label.style.top = `${gridTop(hour * 60)}px`;
+    const d = new Date(2000, 0, 1, hour);
+    label.textContent = d.toLocaleTimeString(undefined, { hour: "numeric" });
+    timegridGutter.appendChild(label);
+  }
+
+  // Pass 2: the hour rules and the timed events themselves, now that an hour
+  // has a known height.
+  const minBlockMinutes = (MIN_BLOCK_PX / hourHeight) * 60;
+
+  days.forEach((day) => {
+    const col = document.createElement("div");
+    col.className = "timegrid-col";
+    if (day.date === today) col.classList.add("today");
+
+    for (let hour = gridStartHour + 1; hour < gridEndHour; hour += 1) {
+      const line = document.createElement("div");
+      line.className = "hour-line";
+      line.style.top = `${gridTop(hour * 60)}px`;
+      col.appendChild(line);
+    }
+
+    const timed = day.events
+      .filter((ev) => !ev.all_day && ev.start_iso && ev.end_iso)
+      .map((ev) => {
+        const { startMin, endMin } = dayMinutes(ev, day.date);
+        return {
+          ev,
+          startMin,
+          // Short events are drawn taller than their real duration so they stay
+          // readable and tappable, so the packer has to treat that drawn height
+          // as the extent it occupies. Otherwise back-to-back short events
+          // (8:45-9:00 then 9:00-9:20) don't count as overlapping and get
+          // stacked directly on top of each other.
+          endMin: Math.max(endMin, startMin + minBlockMinutes),
+          drawEndMin: endMin,
+        };
+      });
+
+    layoutOverlaps(timed).forEach((item) => {
+      const block = document.createElement("div");
+      block.className = "event-block";
+      block.style.background = item.ev.color;
+      const top = Math.max(0, gridTop(item.startMin));
+      const height = Math.max(gridTop(item.drawEndMin) - top, MIN_BLOCK_PX);
+      block.style.top = `${top}px`;
+      block.style.height = `${height}px`;
+      if (height < 36) block.classList.add("event-block--compact");
+      block.style.left = `${(item.col / item.cols) * 100}%`;
+      // 2px shaved off so side-by-side concurrent events read as separate
+      // blocks instead of one continuous band of color.
+      block.style.width = `calc(${(1 / item.cols) * 100}% - 2px)`;
+
+      const title = document.createElement("div");
+      title.className = "event-block-title";
+      title.textContent = item.ev.title;
+      const time = document.createElement("div");
+      time.className = "event-block-time";
+      time.textContent = item.ev.start_time;
+      block.append(title, time);
+
+      attachEventOpen(block, item.ev);
+      col.appendChild(block);
+    });
+
+    timegridCols.appendChild(col);
+  });
+
+  const gridHeight = (gridEndHour - gridStartHour) * hourHeight;
+  timegridCols.style.height = `${gridHeight}px`;
+  timegridGutter.style.height = `${gridHeight}px`;
+
+  renderNowLine(days);
+  scrollTimeGridIntoView(days, gridHeight);
+}
+
+let nowLineTimer = null;
+
+function renderNowLine(days) {
+  // Cleared up front, before any early return: this reschedules itself every
+  // minute over a captured `days`, so a pending timer from a previous render is
+  // holding a stale week. Left alive it would append a now-line to whatever
+  // column index today used to occupy - a column that now belongs to a
+  // different week, or doesn't exist at all in single-column day view - and
+  // would also clear the legitimate timer out from under the current render.
+  clearTimeout(nowLineTimer);
+  document.querySelectorAll(".now-line").forEach((el) => el.remove());
+
+  const index = days.findIndex((day) => day.date === todayIso());
+  const column = timegridCols.children[index];
+  if (index === -1 || !column) return;
+
+  const now = new Date();
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  // Only drawn when the current time is inside the rendered window - outside
+  // it, a line pinned to the top or bottom edge would be actively misleading.
+  if (minutes < gridStartHour * 60 || minutes > gridEndHour * 60) return;
+
+  const line = document.createElement("div");
+  line.className = "now-line";
+  line.style.top = `${gridTop(minutes)}px`;
+  column.appendChild(line);
+
+  nowLineTimer = setTimeout(() => renderNowLine(days), 60 * 1000);
+}
+
+function scrollTimeGridIntoView(days, gridHeight) {
+  const available = timegridScroll.clientHeight;
+  if (gridHeight <= available) {
+    timegridScroll.scrollTop = 0;
+    return;
+  }
+  const showsToday = days.some((day) => day.date === todayIso());
+  // Land an hour before now when today is on screen, otherwise at the top of
+  // the window - either way the wall opens on the part of the day in use.
+  const focusHour = showsToday ? Math.max(gridStartHour, new Date().getHours() - 1) : gridStartHour;
+  timegridScroll.scrollTop = gridTop(focusHour * 60);
+}
+
+/* ---------- agenda / list rendering ---------- */
 
 function renderDayGroups(container, days, rowClass, labelClass, listClass, emptyText) {
   container.innerHTML = "";
@@ -122,12 +513,31 @@ function renderDayGroups(container, days, rowClass, labelClass, listClass, empty
       empty.textContent = emptyText;
       eventsList.appendChild(empty);
     } else {
-      day.events.forEach((ev) => eventsList.appendChild(renderEventCard(ev)));
+      day.events.forEach((ev) => {
+        const card = renderEventCard(ev);
+        attachEventOpen(card, ev);
+        eventsList.appendChild(card);
+      });
     }
     li.appendChild(eventsList);
 
     container.appendChild(li);
   });
+}
+
+/* Says so when the grid is last-known-good data because a refresh failed. The
+   server keeps serving the previous payload rather than blanking the month (see
+   calendar_service._last_good), which is only honest if the wall admits it. */
+function updateStaleIndicator(payload) {
+  if (!payload.stale) {
+    staleBadge.classList.add("hidden");
+    return;
+  }
+  const when = payload.fetched_at
+    ? new Date(payload.fetched_at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    : "earlier";
+  staleBadge.textContent = `Offline \u00b7 last updated ${when}`;
+  staleBadge.classList.remove("hidden");
 }
 
 function updateAccountErrorBadge(errors) {
@@ -147,6 +557,12 @@ function renderGrid(grid) {
   const today = todayIso();
   const dates = Object.keys(grid.days).sort();
 
+  // Rows come from the data, not a fixed 6: a month that fits in 5 weeks would
+  // otherwise render a permanently empty sixth row.
+  const rows = Math.ceil(dates.length / 7);
+  monthGrid.style.gridTemplateRows = `repeat(${rows}, minmax(0, 1fr))`;
+  const capacity = cellCapacity(rows);
+
   for (const dateStr of dates) {
     const cell = document.createElement("div");
     cell.className = "day-cell";
@@ -162,12 +578,29 @@ function renderGrid(grid) {
     cell.appendChild(numEl);
 
     const events = grid.days[dateStr];
-    const maxShown = 3;
+    // Only give up a row to the "+N more" line when something actually
+    // overflows - reserving it unconditionally meant a day with exactly as many
+    // events as would fit still hid one behind a "+1 more".
+    const maxShown = events.length <= capacity.full ? events.length : capacity.withOverflow;
+
     events.slice(0, maxShown).forEach((ev) => {
       const pill = document.createElement("div");
       pill.className = "event-pill";
-      pill.style.background = ev.color;
-      pill.textContent = ev.title;
+      if (ev.all_day) {
+        pill.style.background = ev.color;
+        pill.appendChild(pillTitle(ev.title));
+      } else {
+        // Timed events read as a dot + time + title rather than a solid bar,
+        // so a dense cell doesn't turn into a wall of color blocks.
+        pill.classList.add("event-pill--timed");
+        const dot = document.createElement("span");
+        dot.className = "event-dot";
+        dot.style.background = ev.color;
+        const when = document.createElement("span");
+        when.className = "event-pill-time";
+        when.textContent = ev.start_time;
+        pill.append(dot, when, pillTitle(ev.title));
+      }
       cell.appendChild(pill);
     });
 
@@ -183,17 +616,45 @@ function renderGrid(grid) {
   }
 }
 
-function renderEventCard(ev, { showDate = false } = {}) {
+/* How many pills a month cell can show, measured rather than assumed - a
+   1024x600 panel gives roughly half the cell height of a 1080p one, and a
+   fixed count would either overflow on the small screen or waste the big one.
+   Returns both capacities: `full` when every event fits, and `withOverflow`
+   when a "+N more" line has to be paid for out of the same space. */
+function cellCapacity(rows) {
+  const styles = getComputedStyle(document.documentElement);
+  const pillHeight = parseFloat(styles.getPropertyValue("--pill-height")) || 20;
+  const reserved = parseFloat(styles.getPropertyValue("--day-number-height")) || 26;
+  const overflowHeight = parseFloat(styles.getPropertyValue("--overflow-height")) || 16;
+  const cellHeight = monthGrid.clientHeight / rows;
+  if (!cellHeight) return { full: 3, withOverflow: 2 };
+
+  const usable = cellHeight - reserved;
+  return {
+    full: Math.max(1, Math.floor(usable / pillHeight)),
+    withOverflow: Math.max(1, Math.floor((usable - overflowHeight) / pillHeight)),
+  };
+}
+
+/* The title always goes in its own span, never as a bare text node on the pill:
+   .event-pill is a flex container, and text-overflow: ellipsis has no effect on
+   a flex container's own text - a long all-day title clipped mid-word instead of
+   ellipsising. */
+function pillTitle(text) {
+  const span = document.createElement("span");
+  span.className = "event-pill-title";
+  span.textContent = text;
+  return span;
+}
+
+function renderEventCard(ev) {
   const li = document.createElement("li");
   li.className = "event-card";
   li.style.borderLeftColor = ev.color;
 
   const time = document.createElement("div");
   time.className = "event-card-time";
-  const timeText = ev.all_day ? "All day" : `${ev.start_time} – ${ev.end_time}`;
-  time.textContent = showDate
-    ? `${new Date(ev.start_date + "T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" })} · ${timeText}`
-    : timeText;
+  time.textContent = ev.all_day ? "All day" : `${ev.start_time} – ${ev.end_time}`;
   li.appendChild(time);
 
   const title = document.createElement("div");
@@ -224,6 +685,19 @@ function renderEventCard(ev, { showDate = false } = {}) {
   return li;
 }
 
+/* Makes any rendered event tappable-to-edit. Previously only the day overlay
+   wired this up, so an event visible in week or agenda view couldn't be opened
+   at all without first finding its day in month view. */
+function attachEventOpen(element, ev) {
+  if (ev.access_role !== "owner" && ev.access_role !== "writer") return;
+  element.classList.add("event-card--editable");
+  element.addEventListener("click", (e) => {
+    e.stopPropagation();
+    dayPanel.close();
+    openEditEventModal(ev);
+  });
+}
+
 function openDayOverlay(dateStr, events) {
   const d = new Date(dateStr + "T00:00:00");
   overlayDate.textContent = d.toLocaleDateString(undefined, {
@@ -239,13 +713,7 @@ function openDayOverlay(dateStr, events) {
 
   events.forEach((ev) => {
     const card = renderEventCard(ev);
-    if (ev.access_role === "owner" || ev.access_role === "writer") {
-      card.classList.add("event-card--editable");
-      card.addEventListener("click", () => {
-        dayPanel.close();
-        openEditEventModal(ev);
-      });
-    }
+    attachEventOpen(card, ev);
     overlayEvents.appendChild(card);
   });
 
@@ -263,24 +731,58 @@ function openDayOverlay(dateStr, events) {
 
 const dayPanel = initPanel("day-overlay", "day-overlay-close");
 
-prevBtn.addEventListener("click", () => {
-  if (currentView === "week") {
-    weekAnchor = addDaysIso(weekAnchor, -7);
-  } else {
-    month -= 1;
-    if (month < 1) { month = 12; year -= 1; }
-  }
-  loadCurrentView();
-});
+/* ---------- date navigation ---------- */
 
-nextBtn.addEventListener("click", () => {
-  if (currentView === "week") {
-    weekAnchor = addDaysIso(weekAnchor, 7);
+function stepBy(direction) {
+  if (currentView === "day") {
+    dayAnchor = addDaysIso(dayAnchor, direction);
+  } else if (currentView === "week") {
+    dayAnchor = addDaysIso(dayAnchor, direction * 7);
   } else {
-    month += 1;
+    month += direction;
+    if (month < 1) { month = 12; year -= 1; }
     if (month > 12) { month = 1; year += 1; }
   }
   loadCurrentView();
+}
+
+prevBtn.addEventListener("click", () => stepBy(-1));
+nextBtn.addEventListener("click", () => stepBy(1));
+
+function jumpToToday() {
+  const now = new Date();
+  year = now.getFullYear();
+  month = now.getMonth() + 1;
+  dayAnchor = todayIso();
+  loadCurrentView();
+}
+
+document.getElementById("today-jump").addEventListener("click", jumpToToday);
+
+/* A wall left showing next March should not still be showing it later. After
+   IDLE_MS of nobody touching the screen, close whatever's open and return to
+   the month of today - the most useful thing to be showing unattended. */
+onIdle(() => {
+  dayPanel.close();
+  calendarsPanel.close();
+  // The add/edit sheet is deliberately left open. Someone can easily be four
+  // minutes into filling it in - checking a date on their phone, asking someone
+  // else - without ever touching the screen, and discarding half-entered input
+  // is worse than leaving a stale form up.
+  const now = new Date();
+  year = now.getFullYear();
+  month = now.getMonth() + 1;
+  dayAnchor = todayIso();
+  setView("month");
+});
+
+/* Re-render on resize so pills-per-cell and the time grid's geometry follow
+   the actual viewport - relevant when the kiosk browser starts windowed and
+   goes full-screen a moment later. */
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(loadCurrentView, 250);
 });
 
 async function post(path, body) {
@@ -310,6 +812,13 @@ async function loadAccountLabels() {
   const labelByEmail = {};
   accounts.forEach((a) => { labelByEmail[a.email] = a.label; });
   return labelByEmail;
+}
+
+/* An unconfigured wall showed an empty grid with nothing explaining why. */
+async function checkAccountsPresent() {
+  const resp = await fetch("/api/calendar/accounts");
+  const accounts = await resp.json();
+  noAccounts.classList.toggle("hidden", accounts.length > 0);
 }
 
 /* ---------- manage calendars ---------- */
@@ -394,7 +903,7 @@ let writableCalendars = [];
 let editingEvent = null;
 
 document.getElementById("add-event-toggle").addEventListener("click", () => {
-  openAddEventModal(todayIso());
+  openAddEventModal(currentView === "month" ? todayIso() : dayAnchor);
 });
 
 allDayCheckbox.addEventListener("change", updateDateFieldVisibility);
@@ -622,3 +1131,4 @@ document.getElementById("refresh-toggle").addEventListener("click", async () => 
 
 applyViewVisibility();
 loadCurrentView();
+checkAccountsPresent();

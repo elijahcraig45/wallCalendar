@@ -1,5 +1,20 @@
+import httplib2
 from google.auth.exceptions import GoogleAuthError, RefreshError, TransportError
 from googleapiclient.errors import HttpError
+
+# What a fetch against one account can raise. Wider than it looks: the auth layer
+# wraps network trouble in TransportError, but googleapiclient's own calls go
+# through httplib2, whose ServerNotFoundError (plain DNS failure - i.e. the wifi
+# dropped) is not an OSError, while socket timeouts and TLS errors are. Missing
+# either meant a wifi blip escaped as a 500 and the wall rendered no calendar at
+# all rather than a stale one.
+ACCOUNT_FETCH_ERRORS = (
+    GoogleAuthError,
+    HttpError,
+    ValueError,
+    OSError,
+    httplib2.HttpLib2Error,
+)
 
 # Not GoogleAuthError.retryable: verified against the library source that
 # TransportError (the canonical "just a network blip" case) is raised with
@@ -48,5 +63,11 @@ def classify(email: str, exc: Exception) -> AccountError:
 
     if isinstance(exc, GoogleAuthError):
         return AccountError(email, "unknown", f"{email} may need reconnecting", exc)
+
+    # Network-shaped failures are transient by definition and say nothing about
+    # the credential - telling someone to reconnect their account because the
+    # wifi dropped sends them to fix the wrong thing.
+    if isinstance(exc, (OSError, httplib2.HttpLib2Error)):
+        return AccountError(email, "transient", "Can't reach Google - network problem", exc)
 
     return AccountError(email, "unknown", f"{email} may need reconnecting", exc)

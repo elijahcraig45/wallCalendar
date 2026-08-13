@@ -2,9 +2,22 @@
 
 {% block topbar %}
 <div class="month-nav">
-  <button id="prev-month" class="nav-arrow" aria-label="Previous month">&#8249;</button>
+  <button id="prev-month" class="nav-arrow" aria-label="Previous">&#8249;</button>
   <h1 id="month-label"></h1>
-  <button id="next-month" class="nav-arrow" aria-label="Next month">&#8250;</button>
+  <button id="next-month" class="nav-arrow" aria-label="Next">&#8250;</button>
+  <button id="today-jump" class="pill-button">Today</button>
+  {# Shown when a refresh failed and the grid is last-known-good data. A wall that
+     silently shows yesterday is worse than one that admits it. #}
+  <span id="stale-badge" class="hidden"></span>
+</div>
+{# The view switcher lives in the top bar rather than in its own full-width
+   row: in landscape, vertical space is the scarce axis and the bar has room
+   to spare on the horizontal one. #}
+<div id="view-switcher" role="tablist">
+  <button class="view-tab" data-view="day" aria-selected="false">Day</button>
+  <button class="view-tab" data-view="week" aria-selected="false">Week</button>
+  <button class="view-tab" data-view="month" aria-selected="true">Month</button>
+  <button class="view-tab" data-view="agenda" aria-selected="false">Agenda</button>
 </div>
 <div class="topbar-actions">
   <button id="refresh-toggle" aria-label="Refresh">
@@ -22,18 +35,46 @@
 
 {% block content %}
 <div id="calendar-view" data-year="{{ year }}" data-month="{{ month }}">
-  <div id="view-switcher" role="tablist">
-    <button class="view-tab" data-view="month" aria-selected="true">Month</button>
-    <button class="view-tab" data-view="week" aria-selected="false">Week</button>
-    <button class="view-tab" data-view="agenda" aria-selected="false">Agenda</button>
+  <div id="no-accounts" class="empty-state hidden">
+    <h2>No calendars connected yet</h2>
+    <p>Sign in a Google account to start showing events on this wall.</p>
+    <a href="/accounts" class="pill-button pill-button--accent">Open Accounts</a>
   </div>
+
   <div id="weekday-row">
     <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span>
     <span>Thu</span><span>Fri</span><span>Sat</span>
   </div>
   <div id="month-grid" class="calendar-pane calendar-pane--grid"></div>
-  <ul id="week-view" class="calendar-pane row-list hidden"></ul>
-  <ul id="agenda-view" class="calendar-pane row-list hidden"></ul>
+
+  {# Week and day share one time grid - a day is the same renderer with a
+     single column, so there's no second layout to keep in sync. Day view adds
+     the detail pane beside it: one column stretched across a landscape screen
+     would otherwise turn every event into a banner and waste the width. #}
+  <div id="timegrid-wrap" class="calendar-pane calendar-pane--split hidden">
+    <div id="timegrid" class="timegrid-pane">
+      <div id="timegrid-head">
+        <div class="timegrid-gutter-cell"></div>
+        <div id="timegrid-head-days"></div>
+      </div>
+      <div id="timegrid-allday">
+        <div class="timegrid-gutter-cell">All day</div>
+        <div id="timegrid-allday-cols"></div>
+      </div>
+      <div id="timegrid-scroll">
+        <div id="timegrid-body">
+          <div id="timegrid-gutter"></div>
+          <div id="timegrid-cols"></div>
+        </div>
+      </div>
+    </div>
+    <aside id="day-detail" class="hidden">
+      <div id="day-detail-header"></div>
+      <ul id="day-detail-list"></ul>
+    </aside>
+  </div>
+
+  <ul id="agenda-view" class="calendar-pane agenda-columns hidden"></ul>
 </div>
 
 <div id="day-overlay" class="modal-overlay hidden">
@@ -141,6 +182,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/panel.js"></script>
+{# panel.js is loaded by base.html for the whole shell. #}
 <script src="/static/calendar.js"></script>
 {% endblock %}

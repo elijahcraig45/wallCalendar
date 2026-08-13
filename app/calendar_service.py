@@ -6,9 +6,15 @@ from google.auth.exceptions import GoogleAuthError
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-from app import preferences
+from app import demo_data, preferences
 from app.auth import google_auth
-from app.auth.errors import classify
+from app.auth.errors import ACCOUNT_FETCH_ERRORS, classify
+from app.config import DEMO_MODE
+
+
+class DemoModeError(RuntimeError):
+    """Raised instead of faking a successful write while in demo mode - a demo
+    run must never look like it saved something that went nowhere."""
 
 # Assigned by person (account), not by Google's per-calendar colorId - two
 # accounts means two colors, legible from across a room.
@@ -19,6 +25,11 @@ ERROR_CACHE_TTL_SECONDS = 60
 # Keyed by a tagged tuple so month/week/agenda share one cache:
 # ("month", year, month) / ("week", week_start_iso) / ("agenda", from_iso, num_days)
 _cache: dict[tuple, tuple[float, dict]] = {}
+# The last payload for each key that came back with events and no errors. This is
+# what makes a wifi drop survivable: a wall that replaces a good month with an
+# empty grid is worse than one showing this morning's data with a marker saying
+# so, and household wifi drops regularly.
+_last_good: dict[tuple, dict] = {}
 
 
 def invalidate_cache() -> None:
@@ -27,7 +38,22 @@ def invalidate_cache() -> None:
     # entries. The cache holds a handful of entries with a short TTL in one
     # process - a full clear is trivially correct; computing exactly which
     # keys a given change affects isn't worth it.
+    #
+    # _last_good is deliberately NOT cleared: it isn't a cache of the current
+    # view, it's the fallback for when a fetch fails, and a manual refresh must
+    # not throw away the only good copy we have.
     _cache.clear()
+
+
+def _event_count(payload: dict) -> int:
+    """Total events in a payload, across both shapes: month grids key days by
+    date, week/agenda/day carry an ordered list."""
+    days = payload.get("days")
+    if isinstance(days, dict):
+        return sum(len(events) for events in days.values())
+    if isinstance(days, list):
+        return sum(len(day.get("events", [])) for day in days)
+    return 0
 
 
 def _cached(key: tuple, fetch) -> dict:
@@ -39,6 +65,26 @@ def _cached(key: tuple, fetch) -> dict:
             return cached[1]
 
     result = fetch()
+    result["fetched_at"] = dt.datetime.now().isoformat(timespec="seconds")
+    result["stale"] = False
+
+    # "Every account failed and we got nothing" is the case worth papering over.
+    # A partial failure (one of two accounts broken) still shows real events and
+    # raises the existing error badge, which is the more useful signal.
+    total_failure = bool(result.get("errors")) and _event_count(result) == 0
+    previous = _last_good.get(key)
+
+    if total_failure and previous is not None:
+        result = {
+            **previous,
+            "stale": True,
+            # Carry the live errors, not the stale ones, so the badge explains
+            # what's wrong *now*.
+            "errors": result["errors"],
+        }
+    elif not total_failure:
+        _last_good[key] = result
+
     _cache[key] = (now, result)
     return result
 
@@ -49,7 +95,22 @@ def _person_color(email: str, all_emails: list[str]) -> str:
 
 
 def _owner_label(email: str) -> str:
+    if DEMO_MODE:
+        return demo_data.labels().get(email, email)
     return preferences.load_labels().get(email, email)
+
+
+def signed_in_accounts() -> list[str]:
+    """The one place anything asks "whose calendars are we showing?", so demo
+    mode can answer it without google_auth needing to know demo mode exists."""
+    if DEMO_MODE:
+        return demo_data.accounts()
+    return google_auth.signed_in_accounts()
+
+
+def _require_live_mode() -> None:
+    if DEMO_MODE:
+        raise DemoModeError("Demo mode is on - calendar changes are disabled.")
 
 
 def list_all_calendars(writable_only: bool = False) -> tuple[list[dict], list[dict]]:
@@ -57,14 +118,17 @@ def list_all_calendars(writable_only: bool = False) -> tuple[list[dict], list[di
     exclude list in data/calendar_prefs.json and the Add Event calendar picker.
     Returns (calendars, errors) - one broken account is recorded and skipped
     rather than failing the whole listing."""
+    if DEMO_MODE:
+        return demo_data.calendars(writable_only=writable_only), []
+
     results = []
     errors = []
-    for email in google_auth.signed_in_accounts():
+    for email in signed_in_accounts():
         try:
             creds = google_auth.get_credentials(email)
             service = build("calendar", "v3", credentials=creds)
             calendars = service.calendarList().list().execute().get("items", [])
-        except (GoogleAuthError, HttpError, ValueError) as exc:
+        except ACCOUNT_FETCH_ERRORS as exc:
             errors.append(classify(email, exc).to_dict())
             continue
 
@@ -91,8 +155,14 @@ def check_accounts_health() -> list[dict]:
     get_credentials() alone isn't a sufficient probe: a token revoked
     server-side but not yet locally expired passes it cleanly, so a live
     call is needed to actually prove the credential still works."""
+    if DEMO_MODE:
+        return [
+            {"email": email, "ok": True, "kind": None, "message": None}
+            for email in demo_data.accounts()
+        ]
+
     results = []
-    for email in google_auth.signed_in_accounts():
+    for email in signed_in_accounts():
         try:
             creds = google_auth.get_credentials(email)
             service = build("calendar", "v3", credentials=creds)
@@ -122,7 +192,11 @@ def _grid_bounds(year: int, month: int) -> tuple[dt.date, dt.date]:
     last_of_month = first_of_next_month - dt.timedelta(days=1)
 
     grid_start = _week_start(first_of_month)
-    days_until_saturday = (5 - ((last_of_month.weekday() + 1) % 7)) % 7
+    # Saturday is index 6 in the Sunday-based indexing `(weekday() + 1) % 7`
+    # produces (Sun=0 .. Sat=6). This read 5 - i, which lands on the Friday, so
+    # every month grid stopped a day early and the last row's Saturday column
+    # was always blank.
+    days_until_saturday = (6 - ((last_of_month.weekday() + 1) % 7)) % 7
     grid_end = last_of_month + dt.timedelta(days=days_until_saturday)
 
     return grid_start, grid_end
@@ -180,6 +254,9 @@ def _fetch_events_for_range(
     (events, errors): a failure isolated to one account or one calendar is
     recorded in `errors` and skipped, rather than raising and losing every
     other account's events."""
+    if DEMO_MODE:
+        return demo_data.events_for_range(range_start, range_end, _person_color)
+
     prefs = preferences.load_prefs()
     excluded = set(prefs.get("excluded_calendar_ids", []))
 
@@ -189,7 +266,7 @@ def _fetch_events_for_range(
         + "Z"
     )
 
-    accounts = google_auth.signed_in_accounts()
+    accounts = signed_in_accounts()
     events_by_uid: dict[str, dict] = {}
     errors: list[dict] = []
 
@@ -198,7 +275,7 @@ def _fetch_events_for_range(
             creds = google_auth.get_credentials(email)
             service = build("calendar", "v3", credentials=creds)
             calendars = service.calendarList().list().execute().get("items", [])
-        except (GoogleAuthError, HttpError, ValueError) as exc:
+        except ACCOUNT_FETCH_ERRORS as exc:
             errors.append(classify(email, exc).to_dict())
             continue
 
@@ -242,12 +319,22 @@ def _fetch_events_for_range(
                         if is_all_day:
                             start_time = None
                             end_time = None
+                            start_iso = None
+                            end_iso = None
                             sort_minutes = -1  # all-day events always sort first
                         else:
                             start_dt = dt.datetime.fromisoformat(event["start"]["dateTime"])
                             end_dt = dt.datetime.fromisoformat(event["end"]["dateTime"])
                             start_time = start_dt.strftime("%-I:%M %p")
                             end_time = end_dt.strftime("%-I:%M %p")
+                            # Offset-carrying ISO strings, handed to the time
+                            # grid to position by. Kept as full timestamps
+                            # (not minutes-from-midnight) because one event
+                            # dict is shared across every day it spans, so
+                            # per-day clamping has to happen per column on the
+                            # client, not once here.
+                            start_iso = start_dt.isoformat()
+                            end_iso = end_dt.isoformat()
                             sort_minutes = start_dt.hour * 60 + start_dt.minute
 
                         events_by_uid[uid] = {
@@ -263,6 +350,8 @@ def _fetch_events_for_range(
                             "all_day": is_all_day,
                             "start_time": start_time,
                             "end_time": end_time,
+                            "start_iso": start_iso,
+                            "end_iso": end_iso,
                             "account": email,
                             "owner_label": _owner_label(email),
                             "color": _person_color(email, accounts),
@@ -273,7 +362,7 @@ def _fetch_events_for_range(
                     page_token = resp.get("nextPageToken")
                     if not page_token:
                         break
-            except (HttpError, GoogleAuthError) as exc:
+            except ACCOUNT_FETCH_ERRORS as exc:
                 err = classify(email, exc).to_dict()
                 err["calendar"] = cal.get("summary")
                 errors.append(err)
@@ -347,6 +436,22 @@ def get_week_grid(year: int, month: int, day: int) -> dict:
     return _cached(("week", week_start.isoformat()), lambda: _fetch_week_grid(anchor))
 
 
+def _fetch_day_grid(date: dt.date) -> dict:
+    events, errors = _fetch_events_for_range(date, date)
+    days = _group_events_by_day(events, date, date, skip_empty=False)
+    return {
+        "from": date.isoformat(),
+        "to": date.isoformat(),
+        "days": days,
+        "errors": errors,
+    }
+
+
+def get_day_grid(year: int, month: int, day: int) -> dict:
+    date = dt.date(year, month, day)
+    return _cached(("day", date.isoformat()), lambda: _fetch_day_grid(date))
+
+
 def _fetch_agenda(from_date: dt.date, num_days: int) -> dict:
     to_date = from_date + dt.timedelta(days=num_days - 1)
     events, errors = _fetch_events_for_range(from_date, to_date)
@@ -407,6 +512,7 @@ def create_event(
     recurrence_until: str | None,
     guests: list[str],
 ) -> dict:
+    _require_live_mode()
     body = {"summary": title, "location": location, "description": description}
 
     if all_day:
@@ -458,6 +564,24 @@ def get_event(account: str, calendar_id: str, event_id: str) -> dict:
     events fetched this way never carry their own `recurrence` (only the
     series' master event does), so recurrence_freq/recurrence_until are
     always returned as the "none" starting point, never reverse-parsed."""
+    if DEMO_MODE:
+        event = demo_data.find_event(event_id, _person_color)
+        if event is None:
+            raise ValueError(f"No demo event {event_id}")
+        return {
+            "title": event["title"],
+            "location": event["location"],
+            "description": None,
+            "all_day": event["all_day"],
+            "start": event["start_date"] if event["all_day"] else event["start_iso"][:16],
+            "end": event["end_date"] if event["all_day"] else event["end_iso"][:16],
+            "time_zone": "America/New_York",
+            "recurring_event_id": None,
+            "recurrence_freq": "none",
+            "recurrence_until": None,
+            "guests": [],
+        }
+
     creds = google_auth.get_credentials(account)
     service = build("calendar", "v3", credentials=creds)
     event = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
@@ -515,6 +639,7 @@ def update_event(
     changed are included, via events().patch() rather than events().update()
     so omitted keys are left completely untouched regardless of what else
     changes."""
+    _require_live_mode()
     creds = google_auth.get_credentials(account)
     service = build("calendar", "v3", credentials=creds)
     current = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
@@ -585,6 +710,7 @@ def update_event(
 
 
 def delete_event(account: str, calendar_id: str, event_id: str, notify_guests: bool) -> None:
+    _require_live_mode()
     creds = google_auth.get_credentials(account)
     service = build("calendar", "v3", credentials=creds)
     service.events().delete(
