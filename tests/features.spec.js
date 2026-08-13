@@ -438,6 +438,62 @@ test.describe("light-theme contrast sweep", () => {
     });
   }
 
+  /* The sweep above reads computed styles, and that has one blind spot big enough
+     to have shipped a bug through it: the now-playing pane is backed by blurred
+     album art, and a background IMAGE is not a background COLOR. Nothing in a
+     computed-style walk can tell you how dark this month's album cover is. Worse,
+     the art is a sibling layer rather than an ancestor, so even an
+     "is there an image above me" check would miss it.
+
+     So this one measures pixels. It screenshots the pane, decodes it back into a
+     canvas in-page, and takes the median luminance - text covers a minority of the
+     pane, so the median is the backdrop. Then it checks the title's colour against
+     that. Ground truth, and indifferent to how the backdrop is built. */
+  test("the now-playing pane is readable whatever is playing", async ({ page }) => {
+    await page.goto("/spotify");
+    await page.waitForSelector("#track-title");
+    await page.waitForTimeout(1500);
+
+    const shot = (await page.locator("#nowplaying-pane").screenshot()).toString("base64");
+    const { median, textColor } = await page.evaluate(async (b64) => {
+      const img = new Image();
+      img.src = "data:image/png;base64," + b64;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const channel = (v) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+      };
+      const lums = [];
+      for (let i = 0; i < data.length; i += 4) {
+        lums.push(0.2126 * channel(data[i]) + 0.7152 * channel(data[i + 1]) + 0.0722 * channel(data[i + 2]));
+      }
+      lums.sort((a, b) => a - b);
+      return {
+        median: lums[Math.floor(lums.length / 2)],
+        textColor: getComputedStyle(document.getElementById("track-title")).color,
+      };
+    }, shot);
+
+    const [r, g, b] = textColor.match(/\d+/g).map(Number);
+    const channel = (v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    };
+    const textLum = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+    const ratio = (Math.max(textLum, median) + 0.05) / (Math.min(textLum, median) + 0.05);
+
+    expect(
+      ratio,
+      `track title (${textColor}) against the pane's backdrop (luminance ${median.toFixed(3)})`
+    ).toBeGreaterThan(3);
+  });
+
   /* The loop above only ever proves ONE palette: themeForMonth() resolves by
      today's date, so whichever month it happens to be is the only one measured
      and the other twelve ship unverified. That is a poor deal on a conversion

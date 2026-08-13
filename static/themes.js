@@ -212,6 +212,10 @@ function resolveTheme(theme) {
     // Faint fills have to darken a light ground and lighten a dark one.
     tint: isDark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.04)",
     tintStrong: isDark ? "rgba(255,255,255,0.12)" : "rgba(0,0,0,0.08)",
+    // Over the blurred album art behind the now-playing pane. Strong enough that
+    // the text reads whatever is playing; sheer enough that the album's colour
+    // still comes through.
+    veil: isDark ? "rgba(0,0,0,0.62)" : "rgba(255,255,255,0.80)",
     // Text placed directly on the accent.
     onAccent: luminance(accent) > 0.6 ? "#1d1d1d" : "#ffffff",
     strength: theme.strength == null ? 1 : Number(theme.strength),
@@ -264,6 +268,7 @@ function applyMonthTheme(monthNumber) {
   root.style.setProperty("--text-dim", t.textDim);
   root.style.setProperty("--tint", t.tint);
   root.style.setProperty("--tint-strong", t.tintStrong);
+  root.style.setProperty("--veil", t.veil);
   root.style.setProperty("--on-accent", t.onAccent);
   root.style.setProperty(
     "--theme-strength",

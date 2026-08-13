@@ -23,6 +23,9 @@
      instead of assuming white-over-dark. */
   --tint: rgba(0, 0, 0, 0.04);
   --tint-strong: rgba(0, 0, 0, 0.08);
+  /* Sits over the blurred album art so text legibility never depends on which
+     album happens to be playing. Flips direction with the palette. */
+  --veil: rgba(255, 255, 255, 0.80);
   --spotify-green: #1DB954;
 
   /* Plain px per breakpoint rather than clamp() on purpose: calendar.js reads
@@ -1341,15 +1344,35 @@ html {
 
 /* ---------- now-playing pane ---------- */
 
+/* The blurred album art behind the now-playing pane.
+   It used to carry `brightness(0.35)`, which is a dark theme's assumption written
+   into a filter: darken the art until white text reads on it. On a light ground
+   that inverted into the worst case in the app - dark text on dark art, with the
+   track title and the "Wall Calendar" button effectively invisible. The contrast
+   sweep missed it because a background IMAGE is not a background COLOR, so there
+   was nothing for it to measure.
+   The art is now left alone and a themed veil (--veil, which flips with the
+   palette's lightness) sits between it and the text. */
 #backdrop-blur {
   position: absolute;
   inset: -40px;
   background-size: cover;
   background-position: center;
   background-color: var(--bg);
-  filter: blur(40px) brightness(0.35);
+  filter: blur(40px) saturate(1.1);
   transform: scale(1.1);
   z-index: 0;
+}
+
+/* Painted after #backdrop-blur and before #nowplaying-inner (z-index 1), so the
+   album's colour still tints the pane but never decides whether text is legible. */
+#nowplaying-pane::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--veil);
+  pointer-events: none;
 }
 
 #album-art {
