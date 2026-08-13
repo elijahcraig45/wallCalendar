@@ -438,6 +438,77 @@ test.describe("light-theme contrast sweep", () => {
     });
   }
 
+  /* Today's cell is a translucent accent tint, and what sits UNDER it decides
+     what colour that becomes. .week-cells is painted with --border and the cells
+     sit on it with 1px gaps - that's how the grid is drawn - so a bare
+     `background: <tint>` on today replaced the white surface and composited the
+     accent over the grid-LINE colour. It rendered #e9ddd1 (a tan block) where
+     #fcf7f3 was intended, and on the old dark theme the same bug is what produced
+     the "muddy brown haze" the theme was rewritten twice to remove.
+
+     Comparing against a normal cell rather than asserting a fixed colour, so this
+     holds for any palette: today should read as the same paper, faintly tinted. */
+  test("today's cell is a tint of the paper, not a different colour", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("#month-grid .day-cell.today");
+
+    const { today, plain } = await page.evaluate(() => {
+      const parse = (css) => {
+        const m = (css || "").match(/[\d.]+/g);
+        if (!m) return null;
+        const [r, g, b, a] = m.map(Number);
+        return { r, g, b, a: a === undefined ? 1 : a };
+      };
+      // Composite the element's own background over its ancestors, which is what
+      // the eye sees and what the buggy version got wrong.
+      const composite = (el) => {
+        const layers = [];
+        for (let n = el; n; n = n.parentElement) {
+          const st = getComputedStyle(n);
+          const c = parse(st.backgroundColor);
+          // A background-image tint (how today is layered) reads as an extra pass
+          // of the same colour; approximate it with the accent at its own alpha.
+          if (st.backgroundImage !== "none") {
+            const tint = parse(st.backgroundImage);
+            if (tint) layers.push(tint);
+          }
+          if (c && c.a > 0) {
+            layers.push(c);
+            if (c.a >= 1) break;
+          }
+        }
+        let out = { r: 255, g: 255, b: 255 };
+        for (let i = layers.length - 1; i >= 0; i -= 1) {
+          const l = layers[i];
+          out = {
+            r: l.r * l.a + out.r * (1 - l.a),
+            g: l.g * l.a + out.g * (1 - l.a),
+            b: l.b * l.a + out.b * (1 - l.a),
+          };
+        }
+        return out;
+      };
+      return {
+        today: composite(document.querySelector("#month-grid .day-cell.today")),
+        plain: composite(
+          document.querySelector("#month-grid .day-cell:not(.today):not(.outside-month)")
+        ),
+      };
+    });
+
+    const delta = Math.max(
+      Math.abs(today.r - plain.r),
+      Math.abs(today.g - plain.g),
+      Math.abs(today.b - plain.b)
+    );
+    // The intended tint moves the blue channel most, by ~15/255. The bug moved it
+    // by 46, so 24 separates "faint highlight" from "different-coloured block".
+    expect(
+      delta,
+      `today (${JSON.stringify(today)}) is too far from a normal cell (${JSON.stringify(plain)})`
+    ).toBeLessThan(24);
+  });
+
   /* The sweep above reads computed styles, and that has one blind spot big enough
      to have shipped a bug through it: the now-playing pane is backed by blurred
      album art, and a background IMAGE is not a background COLOR. Nothing in a
@@ -449,7 +520,18 @@ test.describe("light-theme contrast sweep", () => {
      canvas in-page, and takes the median luminance - text covers a minority of the
      pane, so the median is the backdrop. Then it checks the title's colour against
      that. Ground truth, and indifferent to how the backdrop is built. */
-  test("the now-playing pane is readable whatever is playing", async ({ page }) => {
+  for (const palette of ["this month", "night"]) {
+  test(`the now-playing pane is readable whatever is playing (${palette})`, async ({ page }) => {
+    // The veil flips direction with the palette's lightness, so a dark palette
+    // exercises the opposite branch: a dark veil under LIGHT text. Only the
+    // month-of-the-day palette was ever measured before.
+    if (palette === "night") {
+      // Inlined rather than read from themes.js: addInitScript runs before any
+      // page script, so NIGHT_THEME does not exist yet at that point.
+      await page.addInitScript((night) => {
+        localStorage.setItem("wallcal_theme", JSON.stringify(night));
+      }, {"name": "Night", "accent": "#7aa2d6", "base": "#12141a", "surface": "#1b1e26", "lines": "#2c303a", "text": "#f0f0f0", "textDim": "#8a8f9c", "strength": 1.0});
+    }
     await page.goto("/spotify");
     await page.waitForSelector("#track-title");
     await page.waitForTimeout(1500);
@@ -488,11 +570,20 @@ test.describe("light-theme contrast sweep", () => {
     const textLum = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
     const ratio = (Math.max(textLum, median) + 0.05) / (Math.min(textLum, median) + 0.05);
 
+    // Guards against the pin silently not applying, which would make the night
+    // case a second run of the light one - passing while proving nothing.
+    if (palette === "night") {
+      expect(textLum, `night palette did not apply (text is ${textColor})`).toBeGreaterThan(0.5);
+    } else {
+      expect(textLum, `light palette should have dark text (got ${textColor})`).toBeLessThan(0.1);
+    }
+
     expect(
       ratio,
-      `track title (${textColor}) against the pane's backdrop (luminance ${median.toFixed(3)})`
+      `${palette}: track title (${textColor}) vs the pane's backdrop (luminance ${median.toFixed(3)})`
     ).toBeGreaterThan(3);
   });
+  }
 
   /* The loop above only ever proves ONE palette: themeForMonth() resolves by
      today's date, so whichever month it happens to be is the only one measured

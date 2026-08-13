@@ -481,6 +481,11 @@ test.describe("kiosk longevity", () => {
      then. A deploy of the light theme succeeded on every measure except being
      visible on the wall. The client now polls the build and reloads itself. */
   test("a new build reloads the wall", async ({ page }) => {
+    // Demo mode reports playback constantly, and a reload is deliberately
+    // deferred while music plays, so this has to state that nothing is playing.
+    await page.route("**/api/spotify/now-playing", (route) =>
+      route.fulfill({ contentType: "application/json", body: JSON.stringify({ is_playing: false }) })
+    );
     await page.goto("/");
     await page.waitForSelector("#month-grid .day-cell");
 
@@ -499,6 +504,40 @@ test.describe("kiosk longevity", () => {
     await page.evaluate(() => checkBuild());
     await page.waitForFunction(() => window.__beforeDeploy === undefined, null, { timeout: 5000 });
     await expect(page.locator("#month-grid .day-cell").first()).toBeVisible();
+  });
+
+  /* Playback runs in this tab through the Web Playback SDK - there is no
+     librespot on the Pi - so a reload destroys the SDK device: the music stops
+     and the wall drops off Spotify Connect. Nobody touches the screen while an
+     album plays, so the "was anyone just here" guard sails straight through. */
+  test("a new build waits rather than stopping the music", async ({ page }) => {
+    await page.route("**/api/spotify/now-playing", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ is_playing: true, track: "Nightjar", artist: "Ada Mbeki" }),
+      })
+    );
+    await page.goto("/");
+    await page.waitForSelector("#month-grid .day-cell");
+    // Wait on the rail chip rather than the internal flag: `let` at the top level
+    // of a classic script is script-scoped, not a property of window. The pause
+    // button showing is the same poll's is_playing reaching the DOM.
+    await expect(page.locator("#rail-np-pause")).toBeVisible({ timeout: 8000 });
+
+    await page.evaluate(() => { window.__beforeDeploy = true; });
+    await page.route("**/api/version", (route) =>
+      route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ build: "a-different-build", started_at: 1 }),
+      })
+    );
+
+    await page.evaluate(() => checkBuild());
+    await page.waitForTimeout(600);
+    expect(
+      await page.evaluate(() => window.__beforeDeploy),
+      "reloaded mid-song, killing the SDK device"
+    ).toBe(true);
   });
 
   test("an unchanged build does not reload the wall", async ({ page }) => {

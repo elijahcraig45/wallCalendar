@@ -2199,8 +2199,23 @@ textarea.text-input {
    a tall tan block, since a warm accent at that strength over white reads as a
    stain rather than a highlight. The ring and the filled date badge do the work;
    the wash only has to say "this column". */
+/* Two layers, and this is the whole reason today's cell has looked like a brown
+   smudge in every version of this theme, dark and light.
+   .week-cells is painted with --border and the cells sit on it with 1px gaps -
+   that's what draws the grid. So `background: <accent tint>` here REPLACED the
+   white surface rather than tinting it, and the translucent accent composited
+   over the grid-line colour instead. Measured on the wall: --border #ebe4db under
+   the accent at 5.5% gives #e9ddd1, a distinctly tan block, when the intended
+   colour over white was #fcf7f3. On the old dark theme the same bug put the
+   accent over a dark line colour, which is exactly the "muddy brown haze" this
+   theme was rewritten twice to get rid of.
+   background-color keeps the surface; background-image lays the tint on top. */
 .day-cell.today {
-  background: rgb(var(--accent-rgb) / calc(0.055 * var(--theme-strength)));
+  background-color: var(--surface);
+  background-image: linear-gradient(
+    rgb(var(--accent-rgb) / calc(0.07 * var(--theme-strength))),
+    rgb(var(--accent-rgb) / calc(0.07 * var(--theme-strength)))
+  );
   box-shadow: inset 0 0 0 2px rgb(var(--accent-rgb) / calc(0.85 * var(--theme-strength)));
 }
 

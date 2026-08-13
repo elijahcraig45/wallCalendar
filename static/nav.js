@@ -250,8 +250,16 @@ async function checkBuild() {
 
     // Don't yank the page out from under someone mid-tap. A wall calendar is
     // idle almost all the time, so waiting costs nothing and a reload during
-    // use is jarring - and would lose an in-progress timer or search.
+    // use is jarring. (Timers survive it - they store an absolute end time.)
     if (Date.now() - lastInteractionAt < 30 * 1000) return;
+
+    // And never mid-song. Playback runs in THIS tab via the Web Playback SDK, so
+    // a reload destroys the SDK's device: the music stops and the wall vanishes
+    // from Spotify Connect. Nobody is touching the screen while an album plays,
+    // so the interaction guard above would happily reload straight through it.
+    // Deferring is safe - the next poll after playback stops picks the build up.
+    if (playbackActive) return;
+
     window.location.reload();
   } catch (e) {
     // Offline, or the service is mid-restart. Try again next tick.
@@ -261,6 +269,12 @@ async function checkBuild() {
 let lastInteractionAt = 0;
 ["pointerdown", "keydown", "wheel", "touchstart"].forEach((evt) => {
   document.addEventListener(evt, () => { lastInteractionAt = Date.now(); }, { passive: true });
+});
+
+// Reuses the shared poller rather than asking again.
+let playbackActive = false;
+onNowPlaying((data) => {
+  playbackActive = Boolean(data && data.is_playing);
 });
 
 checkBuild();
