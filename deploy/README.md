@@ -1,9 +1,13 @@
 # Pi Kiosk Deployment
 
-Sets up (or updates) this app on a Raspberry Pi OS Bookworm device as a
-kiosk: the Flask backend runs as a systemd service, a timer periodically
-pulls new commits and restarts it, and exactly two things autostart at
-login - the full-screen kiosk browser and UxPlay (AirPlay mirroring).
+Sets up (or updates) this app on a Raspberry Pi as a kiosk: the Flask backend
+runs as a systemd service, a timer periodically pulls new commits and restarts
+it, and the full-screen kiosk browser autostarts at login.
+
+**Verified on:** Raspberry Pi 5 (4 GB), Raspberry Pi OS **Trixie** (Debian 13),
+labwc/Wayland, Python 3.13, Chromium 150, on a 1920x1080 ViewSonic TD2230
+touchscreen. Written originally for Bookworm; the differences that mattered are
+noted below.
 
 ## First-time setup
 
@@ -96,12 +100,39 @@ journalctl -u wallcalendar-autorebuild.service -n 20  # last rebuild check
   rather than auto-edited - it's a shell script, not a list of discrete
   entries, so editing it programmatically risks breaking it. Review
   `~/autostart-backup-*/rc.local.bak` and edit it by hand if needed.
-- **Neither `setup-pi.sh` nor `librespot-setup.sh` has ever run against real
-  hardware.** Review the printed plan in `setup-pi.sh` Step 8 before confirming
-  the autostart cleanup, especially on a Pi that already has a working kiosk
-  setup you don't want to lose. `librespot-setup.sh` pipes the upstream raspotify
+- **What has and hasn't been run on hardware.** The individual pieces have now
+  all been exercised on the Pi above: the systemd service, the sudoers rule, the
+  auto-rebuild timer (including its dirty-tree guard), the kiosk launcher and the
+  XDG autostart entry. **`setup-pi.sh` itself has still never been run** - the
+  deploy was done step by step instead, precisely so its riskier autostart
+  cleanup could be avoided on a device that already had a working kiosk.
+  `librespot-setup.sh` has also never run; it pipes the upstream raspotify
   installer to `sh` (as upstream documents) and rewrites `/etc/raspotify/conf`,
-  keeping a `.orig` copy — read it before running it.
+  keeping a `.orig` copy - read it before running it.
+
+- **The autostart cleanup will not find a systemd-started kiosk, which is the
+  common case.** This Pi was running MagicMirror² started by `pm2` via an enabled
+  `pm2-calendar.service`, plus a second UxPlay via `uxplay.service`. None of that
+  lives in XDG autostart, wayfire, labwc or crontab, so `cleanup-autostart.sh`
+  reports a clean slate while another fullscreen app is still fighting for the
+  screen. Check `systemctl list-unit-files --state=enabled` by hand.
+
+- **Chromium needs its ozone backend chosen explicitly.** On Trixie/labwc it
+  still defaults to X11 and dies with `Missing X server or $DISPLAY`.
+  `kiosk-launch.sh` now picks wayland or x11 from what is actually running.
+
+- **Chromium must be told not to use a keyring.** Without
+  `--password-store=basic` it asks gnome-keyring for a password store, and a
+  modal "Choose password for new keyring" dialog appears over the kiosk on every
+  boot, on-screen keyboard and all, waiting for a human who isn't there.
+
+- **`gh` is not needed for the app repo** (it's public, and the script falls back
+  to an https clone) **but is needed for `wallCalendar-secrets`**, which is
+  private. Without it the script warns and skips, leaving the app unauthenticated.
+  Copying `secrets/`, `.env` and `data/account_labels.json` over with `scp` works
+  just as well - take them from the *live* `wallCalendar/secrets/` on a working
+  machine, not from the `wallCalendar-secrets` backup, which can be behind on
+  token scopes.
 
 ## If the wall stops updating
 
