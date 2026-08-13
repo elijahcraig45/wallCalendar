@@ -37,19 +37,34 @@ else
   exit 1
 fi
 
-exec "$CHROMIUM_BIN" \
-  --kiosk \
-  $OZONE_ARGS \
-  `# Without this, Chromium asks gnome-keyring for a password store and a modal` \
-  `# "Choose password for new keyring" dialog appears over the kiosk on every` \
-  `# boot, waiting for a human who isn't there. The wall stores no passwords, so` \
-  `# the basic (in-profile) store is the right answer, not a keyring.` \
-  --password-store=basic \
-  --noerrdialogs \
-  --disable-infobars \
-  --disable-session-crashed-bubble \
-  --disable-features=TranslateUI \
-  --check-for-update-interval=31536000 \
-  --start-fullscreen \
-  --incognito \
-  "$URL"
+# Supervised rather than exec'd. This used to exec Chromium, which meant anything
+# that killed the browser - a crash, an OOM, or someone restarting it to pick up
+# new assets - left a black screen until a human power-cycled the thing, because
+# the autostart entry only ever fires at session login. A wall display is
+# unattended for weeks at a time, so it has to come back on its own.
+#
+# It also makes `pkill chromium` a safe way to reload the wall over SSH.
+while true; do
+  "$CHROMIUM_BIN" \
+    --kiosk \
+    $OZONE_ARGS \
+    `# Without this, Chromium asks gnome-keyring for a password store and a modal` \
+    `# "Choose password for new keyring" dialog appears over the kiosk on every` \
+    `# boot, waiting for a human who isn't there. The wall stores no passwords, so` \
+    `# the basic (in-profile) store is the right answer, not a keyring.` \
+    --password-store=basic \
+    --noerrdialogs \
+    --disable-infobars \
+    --disable-session-crashed-bubble \
+    --disable-features=TranslateUI \
+    --check-for-update-interval=31536000 \
+    --start-fullscreen \
+    --incognito \
+    "$URL"
+
+  # A clean exit still means the wall is now blank, so it restarts either way.
+  # The pause keeps a persistent startup failure from becoming a spin loop that
+  # eats the CPU the calendar needs.
+  echo "kiosk-launch: chromium exited ($?); restarting in 3s" >&2
+  sleep 3
+done
