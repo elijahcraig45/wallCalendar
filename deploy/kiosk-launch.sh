@@ -29,7 +29,17 @@ fi
 # to the X11 backend, which fails outright with "Missing X server or $DISPLAY"
 # unless Xwayland happens to be up. Native Wayland also avoids an Xwayland hop.
 if [ -n "${WAYLAND_DISPLAY:-}" ]; then
-  OZONE_ARGS="--ozone-platform=wayland"
+  # --enable-wayland-ime plus a text-input version is what makes the on-screen
+  # keyboard work, and without it there is no way to type on this thing at all:
+  # tapping the event Title field, or Spotify search, focused the input and nothing
+  # appeared. squeekboard was installed and running the whole time, and labwc
+  # supports the protocol - the missing piece was Chromium, which does not
+  # advertise text-input under Wayland unless told to, so the compositor never
+  # learned that a text field had focus and never asked for a keyboard.
+  #
+  # Both switches are present in Chromium 150 (checked against the binary rather
+  # than assumed - Chromium removes switches without much ceremony).
+  OZONE_ARGS="--ozone-platform=wayland --enable-wayland-ime --wayland-text-input-version=3"
 elif [ -n "${DISPLAY:-}" ]; then
   OZONE_ARGS="--ozone-platform=x11"
 else

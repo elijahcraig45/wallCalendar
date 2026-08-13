@@ -1138,3 +1138,32 @@ test.describe("severe weather banner", () => {
     expect(calls, "the alerts endpoint was polled more than once per cycle").toBe(1);
   });
 });
+
+test.describe("touch input", () => {
+  test.use({ viewport: { width: 1920, height: 1080 } });
+
+  /* On the wall there is no hardware keyboard: the compositor only offers an
+     on-screen keyboard once something has text focus. Opening the sheet therefore
+     has to focus the title itself, or "add an event" needs two taps before you can
+     type - and the first version needed exactly that.
+     (The other half of this was Chromium not advertising text-input under Wayland
+     at all, which is a launch flag rather than anything testable here - see
+     deploy/kiosk-launch.sh.) */
+  test("opening the event sheet focuses the title so a keyboard can appear", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("#month-grid .day-cell");
+
+    await page.click("#add-event-toggle");
+    await expect(page.locator("#add-event-overlay")).toBeVisible();
+
+    const focused = await page.evaluate(() => document.activeElement?.id);
+    expect(focused, "the title field is not focused, so no keyboard would appear")
+      .toBe("add-event-title");
+
+    // And it has to be a real text field: a compositor offers no keyboard for a
+    // div, however editable it looks.
+    await expect(page.locator("#add-event-title")).toHaveAttribute("type", "text");
+    await page.keyboard.type("Dentist");
+    await expect(page.locator("#add-event-title")).toHaveValue("Dentist");
+  });
+});

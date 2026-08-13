@@ -1080,6 +1080,13 @@ async function openAddEventModal(prefillDateIso) {
   endInput.value = `${date}T10:00`;
 
   addEventPanel.open();
+
+  /* Focus the title so the on-screen keyboard comes up with the sheet, rather than
+     needing a second tap on the field. The compositor only offers a keyboard once
+     something has text focus, so on a touchscreen "open the form" and "start
+     typing" should be the same gesture.
+     After open() because focusing a hidden input doesn't raise it. */
+  titleInput.focus();
 }
 
 async function openEditEventModal(ev) {
