@@ -2770,8 +2770,22 @@ textarea.text-input {
 
 /* radar */
 
-#wx-radar-block { min-height: 0; display: flex; flex-direction: column; }
-#wx-radar { flex: 1; min-height: 0; border-radius: 12px; overflow: hidden; background: var(--surface); }
+#wx-radar-block { flex: 0 0 auto; display: flex; flex-direction: column; }
+
+/* Sized from its own width via aspect-ratio, NOT from the column.
+   This was `flex: 1; height: 100%`, which worked while the radar had a column to
+   itself and collapsed to zero height once it moved in above the alerts: the
+   thumbnail img is height:100% of a parent that never grew, so the live page
+   rendered an empty div. It survived the tests because they checked the wiring
+   (which URL loads, which tab is active) and never that the thing had a size.
+   600x550 is the RIDGE image's own shape. */
+#wx-radar {
+  width: 100%;
+  aspect-ratio: 600 / 550;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface);
+}
 
 .wx-radar-img {
   width: 100%;

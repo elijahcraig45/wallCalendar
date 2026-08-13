@@ -717,6 +717,13 @@ test.describe("weather page", () => {
     await page.route("https://radar.weather.gov/**", (route) => route.abort());
     await page.goto("/weather");
 
+    /* The thumbnail must have a SIZE, not just a src. It once had `height: 100%`
+       inside a flex parent that never grew, so the live page rendered an empty
+       div - the wiring assertions below all passed while nothing was on screen. */
+    const box = await page.locator("#wx-radar").boundingBox();
+    expect(box.width, "radar thumbnail has no width").toBeGreaterThan(120);
+    expect(box.height, "radar thumbnail collapsed to nothing").toBeGreaterThan(120);
+
     const overlay = page.locator("#wx-radar-overlay");
     await expect(overlay).toBeHidden();
     await page.locator("#wx-radar").click();
