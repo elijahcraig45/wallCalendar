@@ -62,6 +62,21 @@
     </nav>
 
     <div id="stage">
+      {# Severe weather, on every page: the wall shows a calendar all day, so that
+         is where a warning has to arrive rather than only on /weather.
+
+         Inside the stage and in normal flow on purpose. As a fixed overlay it sat
+         on top of the header and swallowed every tap meant for the clock, the view
+         tabs and the nav - it has to push the page down, not cover it. It still
+         stacks above the night-dimming overlay; see the z-index note in the CSS. #}
+      <div id="alert-banner" class="hidden" role="alert">
+        <div id="alert-banner-body">
+          <span id="alert-banner-event"></span>
+          <span id="alert-banner-when"></span>
+          <span id="alert-banner-area"></span>
+        </div>
+        <button id="alert-banner-dismiss" type="button" aria-label="Dismiss this warning">&times;</button>
+      </div>
       <header id="top-bar">
         <div id="clock" aria-live="off">
           <div id="clock-time"></div>
@@ -133,6 +148,8 @@
        weather.js - defines onWeather(), which nav.js subscribes to for sunset
        nav.js     - shell: clock, rail, now-playing, dimming, idle
        timers.js  - uses showToast/wakeScreen from nav.js at runtime
+       alerts.js  - owns the severe-weather poll for the whole app and calls
+                    wakeScreen() from nav.js, so it loads after it
      panel.js used to live on the calendar page; the weather and timer overlays
      are shell furniture, so it had to move up here. #}
   <script src="/static/panel.js?v={{ build }}"></script>
@@ -140,6 +157,7 @@
   <script src="/static/weather.js?v={{ build }}"></script>
   <script src="/static/nav.js?v={{ build }}"></script>
   <script src="/static/timers.js?v={{ build }}"></script>
+  <script src="/static/alerts.js?v={{ build }}"></script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

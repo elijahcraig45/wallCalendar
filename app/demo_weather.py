@@ -85,9 +85,15 @@ def _hourly(dates: list[str]) -> dict:
     }
 
 
-# One of each kind the UI treats differently: an urgent event (so the urgent
-# styling and count are exercised), an ordinary advisory, and an expired one that
-# must be filtered out rather than displayed.
+# Two ordinary advisories and one expired one that must be filtered out rather than
+# displayed.
+#
+# Deliberately nothing URGENT. A tornado/severe-thunderstorm-class alert raises the
+# shell banner on every page, and with it permanently in the fixtures every test and
+# screenshot ran against a calendar 48px shorter - so the normal state, which is what
+# the wall looks like almost always, stopped being covered at all. The banner and the
+# urgent styling are exercised by routing an urgent alert in, which is also the only
+# way to test the arrival behaviour.
 def _alert_payload() -> dict:
     now = dt.datetime.now(dt.timezone.utc).astimezone()
     def stamp(hours):
@@ -96,21 +102,20 @@ def _alert_payload() -> dict:
     return {
         "features": [
             {
-                "id": "demo-alert-severe",
+                "id": "demo-alert-air",
                 "properties": {
-                    "id": "demo-alert-severe",
-                    "event": "Severe Thunderstorm Warning",
-                    "severity": "Severe",
-                    "urgency": "Immediate",
-                    "headline": f"Severe Thunderstorm Warning issued until {(now + dt.timedelta(hours=1)).strftime('%I:%M %p')}",
+                    "id": "demo-alert-air",
+                    "event": "Air Quality Alert",
+                    "severity": "Moderate",
+                    "urgency": "Expected",
+                    "headline": f"Air Quality Alert issued until {(now + dt.timedelta(hours=1)).strftime('%I:%M %p')}",
                     "areaDesc": "Fulton; DeKalb; Cobb",
                     "onset": stamp(0),
                     "ends": stamp(1),
                     "expires": stamp(1),
                     "senderName": "NWS Peachtree City GA",
-                    "description": "At 2:14 PM, a severe thunderstorm was located near "
-                                   "Douglasville, moving east at 35 mph. HAZARD: 60 mph wind "
-                                   "gusts and quarter size hail.",
+                    "description": "Ozone levels are expected to reach the unhealthy range "
+                                   "for sensitive groups during the afternoon.",
                     "instruction": "For your protection move to an interior room on the "
                                    "lowest floor of a building.",
                 },

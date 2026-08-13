@@ -116,8 +116,6 @@ function renderNowPlaying(data) {
   renderProgress();
 }
 
-onNowPlaying(renderNowPlaying);
-
 async function post(path, body) {
   const resp = await fetch(path, {
     method: "POST",
@@ -766,3 +764,15 @@ async function openArtistDetail(item) {
     artistAlbumsEl.appendChild(li);
   });
 }
+
+/* Last in the file, like the other page scripts.
+ *
+ * onNowPlaying() invokes its listener immediately when a poll has already
+ * answered, and pending network callbacks run between script tags - so on a fast
+ * response this executes during evaluation of this file. It happens to be safe
+ * where it used to sit (renderNowPlaying and everything it calls only touch
+ * bindings declared above it), but that is luck of ordering rather than design,
+ * and the same pattern in wxpage.js threw a temporal-dead-zone ReferenceError.
+ * Cheaper to hold the invariant than to re-derive that proof on every edit -
+ * tests/api_checks.py enforces it. */
+onNowPlaying(renderNowPlaying);

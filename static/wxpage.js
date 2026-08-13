@@ -8,8 +8,10 @@
  *
  * Update cadences, since they differ on purpose:
  *   conditions/forecast  15 min  - Open-Meteo's own data moves about hourly
- *   alerts                3 min  - a tornado warning is worth having promptly
+ *   air quality/pollen   30 min  - AQI moves over hours, pollen once a day
  *   radar                 4 min  - roughly how often NWS publishes a new frame
+ *   alerts                3 min  - owned by alerts.js, which polls for the whole
+ *                                  app so the banner works on every page
  */
 
 const wxNow = document.getElementById("wx-now");
@@ -25,7 +27,6 @@ const wxAir = document.getElementById("wx-air");
 const wxSun = document.getElementById("wx-sun");
 const wxUpdated = document.getElementById("wx-updated");
 
-const WX_ALERTS_MS = 3 * 60 * 1000;
 const WX_RADAR_MS = 4 * 60 * 1000;
 // Air quality moves over hours and pollen is published once a day.
 const WX_AIR_MS = 30 * 60 * 1000;
@@ -52,7 +53,7 @@ function wxHourLabel(iso) {
 /* ---------- conditions ---------- */
 
 // Subscribes to the shell's poller rather than adding a second one.
-onWeather((data) => {
+function wxRenderConditions(data) {
   if (!data || data.available === false) {
     wxNow.innerHTML = '<p class="wx-empty">Weather unavailable.</p>';
     wxHourly.innerHTML = "";
@@ -92,7 +93,7 @@ onWeather((data) => {
   if (data.fetched_at) {
     wxUpdated.textContent = `Updated ${wxTime(data.fetched_at)}`;
   }
-});
+}
 
 /* ---------- thunderstorm outlook ----------
  * This is the honest version of "lightning proximity". There is no free feed of
@@ -297,14 +298,7 @@ wxAlerts.addEventListener("click", (event) => {
   head.setAttribute("aria-expanded", String(nowOpen));
 });
 
-async function wxLoadAlerts() {
-  try {
-    const resp = await fetch("/api/weather/alerts");
-    wxRenderAlerts(resp.ok ? await resp.json() : null);
-  } catch (e) {
-    wxRenderAlerts({ alerts: [], errors: ["Couldn't reach the alerts service."] });
-  }
-}
+
 
 
 
@@ -611,16 +605,14 @@ document.querySelectorAll("[data-wx-radar]").forEach((tab) => {
 /* ---------- wiring ---------- */
 
 document.getElementById("wx-refresh").addEventListener("click", () => {
-  wxLoadAlerts();
+  refreshAlerts();       // shell-owned
   wxLoadAir();
   wxRefreshRadar();
   refreshWeather();
 });
 
-wxLoadAlerts();
 wxLoadAir();
 wxLoadRadar();
-setInterval(wxLoadAlerts, WX_ALERTS_MS);
 setInterval(wxLoadAir, WX_AIR_MS);
 setInterval(wxRefreshRadar, WX_RADAR_MS);
 
@@ -633,3 +625,23 @@ onIdle(() => {
     el.setAttribute("aria-expanded", "false")
   );
 });
+
+/* ---------- subscriptions ----------
+ * LAST in the file, deliberately.
+ *
+ * onWeather() and onAlerts() invoke the listener immediately when data has already
+ * arrived, and pending network callbacks run BETWEEN script tags - so if the
+ * weather fetch started by weather.js lands before this file is evaluated, the
+ * listener runs during evaluation. Registered at the top, that reached
+ * wxRenderThunder() before `const WX_CAPE_BANDS` had been initialised: a
+ * ReferenceError from the temporal dead zone, and one that only appears when the
+ * server answers quickly. Every declaration above is in place by the time these
+ * run.
+ *
+ * Both are also the reason this page adds no pollers of its own for weather or
+ * alerts - the shell owns those, so being on this page doesn't double the request
+ * rate against Open-Meteo or the National Weather Service.
+ */
+
+onWeather(wxRenderConditions);
+onAlerts(wxRenderAlerts);

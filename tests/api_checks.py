@@ -584,6 +584,45 @@ def check_pollen_provider_fallback():
     check("the AQI is unaffected by any of this", broken["aqi"]["aqi"] == 52)
 
 
+
+def check_shell_subscriptions_come_last():
+    """A page script's onWeather()/onAlerts()/onNowPlaying() calls must appear after
+    its top-level declarations.
+
+    Those helpers invoke the listener IMMEDIATELY when data has already arrived, and
+    pending network callbacks run between script tags - so a fast server means the
+    listener executes while the page script is still being evaluated. Registered
+    near the top, wxpage.js reached wxRenderThunder() before `const WX_CAPE_BANDS`
+    was initialised and threw a temporal-dead-zone ReferenceError. It only appeared
+    when the response was quick, which is the worst kind of bug to own.
+    """
+    print("shell subscription ordering")
+    static = pathlib.Path(__file__).resolve().parent.parent / "static"
+    subscribers = ("onWeather(", "onAlerts(", "onNowPlaying(")
+
+    for path in sorted(static.glob("*.js")):
+        # Shell scripts define these; only page scripts consume them.
+        if path.name in {"weather.js", "nav.js", "alerts.js"}:
+            continue
+        lines = path.read_text().splitlines()
+
+        calls = [i for i, line in enumerate(lines) if line.startswith(subscribers)]
+        if not calls:
+            continue
+
+        last_decl = max(
+            (i for i, line in enumerate(lines)
+             if line.startswith("const ") or line.startswith("let ")),
+            default=-1,
+        )
+        check(
+            f"{path.name} subscribes after its declarations",
+            min(calls) > last_decl,
+            f"subscribes at line {min(calls) + 1}, last top-level declaration at "
+            f"line {last_decl + 1}",
+        )
+
+
 def main():
     os.environ.setdefault("FLASK_SECRET_KEY", "api-checks")
     for fn in (
@@ -600,6 +639,7 @@ def main():
         check_google_pollen_parsing,
         check_pollen_key_never_rides_in_a_url,
         check_pollen_provider_fallback,
+        check_shell_subscriptions_come_last,
     ):
         fn()
 

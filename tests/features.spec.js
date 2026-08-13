@@ -632,13 +632,36 @@ test.describe("weather page", () => {
     expect(await page.locator(".wx-day").count()).toBe(10);
 
     // The demo fixture carries three alerts, one of them already expired: the
-    // expired one must not be rendered.
+    // expired one must not be rendered. None are urgent - see demo_weather.py for
+    // why the fixtures deliberately don't raise the shell banner.
     expect(await page.locator(".wx-alert").count()).toBe(2);
-    expect(await page.locator(".wx-alert--urgent").count()).toBe(1);
+    expect(await page.locator(".wx-alert--urgent").count()).toBe(0);
     await expect(page.locator("#wx-alert-count")).toHaveText("2");
-    await expect(page.locator(".wx-alert").first()).toContainText("Severe Thunderstorm Warning");
     await expect(page.locator("#wx-alerts")).not.toContainText("Flood Advisory");
+    // And with nothing urgent, the shell banner stays down.
+    await expect(page.locator("#alert-banner")).toBeHidden();
     await shoot(page, "weather-page");
+  });
+
+  test("an urgent alert is styled as urgent in the list", async ({ page }) => {
+    await page.route("**/api/weather/alerts", (route) =>
+      route.fulfill({
+        json: {
+          alerts: [
+            {
+              id: "t1", event: "Tornado Warning", severity: "Extreme", urgent: true,
+              area: "Fulton", headline: "Tornado Warning issued",
+              description: "Take shelter.", instruction: "Move to a basement.",
+              sender: "NWS", ends: null, expires: null,
+            },
+          ],
+          count: 1, urgent_count: 1,
+        },
+      })
+    );
+    await page.goto("/weather");
+    expect(await page.locator(".wx-alert--urgent").count()).toBe(1);
+    await expect(page.locator("#wx-alert-count")).toHaveClass(/wx-count--urgent/);
   });
 
   test("an alert opens to its full text and closes again", async ({ page }) => {
@@ -941,3 +964,177 @@ test.describe("weather page", () => {
   });
 });
 
+test.describe("severe weather banner", () => {
+  test.use({ viewport: { width: 1920, height: 1080 } });
+
+  const alert = (over = {}) => ({
+    id: "a1", event: "Tornado Warning", severity: "Extreme", urgent: true,
+    area: "Fulton; DeKalb; Cobb", headline: "Tornado Warning issued",
+    ends: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
+    expires: new Date(Date.now() + 45 * 60 * 1000).toISOString(),
+    description: "Take shelter now.", instruction: "Move to a basement.",
+    sender: "NWS Peachtree City GA", ...over,
+  });
+
+  const serve = (alerts) => (route) =>
+    route.fulfill({
+      json: {
+        alerts,
+        count: alerts.length,
+        urgent_count: alerts.filter((a) => a.urgent).length,
+      },
+    });
+
+  /* The whole point: the wall shows a calendar all day, so a warning that only
+     appears on /weather is not doing its job. */
+  test("an urgent warning shows on the calendar, not just the weather page", async ({ page }) => {
+    await page.route("**/api/weather/alerts", serve([alert()]));
+    await page.goto("/");
+    await expect(page.locator("#alert-banner")).toBeVisible();
+    await expect(page.locator("#alert-banner-event")).toHaveText("Tornado Warning");
+    await expect(page.locator("#alert-banner-area")).toContainText("Fulton");
+    await shoot(page, "alert-banner");
+  });
+
+  test("a non-urgent advisory does not take over the wall", async ({ page }) => {
+    // A heat advisory is worth a line on the weather page and nothing more; a
+    // banner for every advisory would train you to ignore the banner.
+    await page.route("**/api/weather/alerts", serve([
+      alert({ id: "h1", event: "Heat Advisory", severity: "Moderate", urgent: false }),
+    ]));
+    await page.goto("/");
+    await page.waitForTimeout(800);
+    await expect(page.locator("#alert-banner")).toBeHidden();
+  });
+
+  /* The dangerous bug this guards against: a single "dismissed" flag would mean
+     dismissing a heat advisory at noon silently suppresses a tornado warning at
+     6pm. Dismissal is per alert id. */
+  test("dismissing one warning does not suppress a different one", async ({ page }) => {
+    await page.route("**/api/weather/alerts", serve([
+      alert({ id: "flood", event: "Flash Flood Warning" }),
+    ]));
+    await page.goto("/");
+    await expect(page.locator("#alert-banner-event")).toHaveText("Flash Flood Warning");
+
+    await page.locator("#alert-banner-dismiss").click();
+    await expect(page.locator("#alert-banner")).toBeHidden();
+
+    // A different alert arrives on the next poll: it must NOT be suppressed.
+    await page.unroute("**/api/weather/alerts");
+    await page.route("**/api/weather/alerts", serve([alert({ id: "tornado" })]));
+    await page.evaluate(() => refreshAlerts());
+    await expect(page.locator("#alert-banner")).toBeVisible();
+    await expect(page.locator("#alert-banner-event")).toHaveText("Tornado Warning");
+
+    // ...while the one that WAS dismissed stays dismissed.
+    await page.unroute("**/api/weather/alerts");
+    await page.route("**/api/weather/alerts", serve([
+      alert({ id: "flood", event: "Flash Flood Warning" }),
+    ]));
+    await page.evaluate(() => refreshAlerts());
+    await expect(page.locator("#alert-banner")).toBeHidden();
+  });
+
+  test("several urgent warnings collapse to one banner with a count", async ({ page }) => {
+    await page.route("**/api/weather/alerts", serve([
+      alert({ id: "t", event: "Tornado Warning" }),
+      alert({ id: "f", event: "Flash Flood Warning" }),
+    ]));
+    await page.goto("/");
+    await expect(page.locator("#alert-banner-event")).toHaveText("Tornado Warning (+1 more)");
+  });
+
+  /* 2am is when this matters most, and it's also when a black overlay covers the
+     screen. The banner has to be above it - this was z-index 60 against the
+     overlay's 3000, i.e. underneath. */
+  test("the banner sits above the night dimming overlay", async ({ page }) => {
+    await page.route("**/api/weather/alerts", serve([alert()]));
+    await page.goto("/");
+    await expect(page.locator("#alert-banner")).toBeVisible();
+
+    const stacking = await page.evaluate(() => {
+      const banner = document.getElementById("alert-banner");
+      document.getElementById("night-dim").classList.remove("hidden");
+      const rect = banner.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.left + 40, rect.top + rect.height / 2);
+      return {
+        bannerZ: Number(getComputedStyle(banner).zIndex),
+        dimZ: Number(getComputedStyle(document.getElementById("night-dim")).zIndex),
+        bannerOnTop: banner.contains(hit) || banner === hit,
+      };
+    });
+    expect(stacking.bannerZ).toBeGreaterThan(stacking.dimZ);
+    expect(stacking.bannerOnTop, "the dimming overlay covers the warning").toBe(true);
+  });
+
+  /* The banner takes real height, and on a 600px panel that comes straight off the
+     month rows - which had already trimmed their pills to fit the taller layout, so
+     14 cells ended up clipping their own content. Nothing fires window.resize for
+     this, hence the explicit layout-change event, and the banner is tightened on
+     short panels because 48px of 600 is 8% of the screen. */
+  test("a warning arriving later re-fits the calendar rather than clipping it",
+    async ({ page }) => {
+      await page.setViewportSize({ width: 1024, height: 600 });
+
+      // Start with nothing active - which is how the wall spends nearly all its
+      // time - and let the month grid settle and trim to the full height.
+      await page.route("**/api/weather/alerts", serve([]));
+      await page.goto("/");
+      await page.waitForSelector("#month-grid .day-cell");
+      await page.waitForTimeout(1000);
+      await expect(page.locator("#alert-banner")).toBeHidden();
+
+      const before = await page.evaluate(() =>
+        [...document.querySelectorAll("#month-grid .day-cell")]
+          .filter((c) => c.scrollHeight > c.clientHeight + 1).length
+      );
+      expect(before, "clipping before any warning").toBe(0);
+
+      // Now a warning arrives, hours later, and takes height off every row. The
+      // cells have ALREADY trimmed to fit the taller layout, and nothing fires
+      // window.resize for this - which left 14 of them clipping their own content.
+      await page.unroute("**/api/weather/alerts");
+      await page.route("**/api/weather/alerts", serve([alert()]));
+      await page.evaluate(() => refreshAlerts());
+      await expect(page.locator("#alert-banner")).toBeVisible();
+      await page.waitForTimeout(1400);   // the relayout debounce
+
+      const after = await page.evaluate(() => {
+        const cells = [...document.querySelectorAll("#month-grid .day-cell")];
+        return {
+          cells: cells.length,
+          clipping: cells.filter((c) => c.scrollHeight > c.clientHeight + 1).length,
+          overflowMarkers: document.querySelectorAll(".event-overflow").length,
+          bannerHeight: Math.round(
+            document.getElementById("alert-banner").getBoundingClientRect().height
+          ),
+        };
+      });
+
+      expect(after.cells, "the grid lost rows to the banner").toBe(42);
+      expect(after.clipping, "cells clipping after the banner took their height")
+        .toBe(0);
+      // It fits by hiding pills behind "+N more", not by overflowing.
+      expect(after.overflowMarkers).toBeGreaterThan(0);
+      // 48px out of 600 is 8% of the screen, so the banner tightens here.
+      expect(after.bannerHeight, "the banner is not compact on a short panel")
+        .toBeLessThan(44);
+      await expectNoSidewaysScroll(page, "calendar with a warning at 1024x600");
+    });
+
+  /* Both the shell banner and the weather page's list are fed by one poll. Two
+     pollers would double the request rate against the NWS. */
+  test("the weather page adds no second alerts poll", async ({ page }) => {
+    let calls = 0;
+    await page.route("**/api/weather/alerts", (route) => {
+      calls += 1;
+      return serve([alert()])(route);
+    });
+    await page.goto("/weather");
+    await expect(page.locator("#alert-banner")).toBeVisible();
+    await expect(page.locator(".wx-alert").first()).toContainText("Tornado Warning");
+    await page.waitForTimeout(1500);
+    expect(calls, "the alerts endpoint was polled more than once per cycle").toBe(1);
+  });
+});

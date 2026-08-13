@@ -869,10 +869,35 @@ onIdle(() => {
    the actual viewport - relevant when the kiosk browser starts windowed and
    goes full-screen a moment later. */
 let resizeTimer = null;
-window.addEventListener("resize", () => {
+function scheduleRelayout() {
   clearTimeout(resizeTimer);
   resizeTimer = setTimeout(loadCurrentView, 250);
-});
+}
+
+window.addEventListener("resize", scheduleRelayout);
+
+/* The severe-weather banner appears and disappears without a window resize, and it
+   takes real vertical space - on a 600px panel that left 72 day cells clipping
+   their own content, because trimCellsToFit() had already run against the taller
+   layout. */
+window.addEventListener("wallcal:layoutchange", scheduleRelayout);
+
+/* And a belt-and-braces observer for anything else that changes the room available:
+   the demo banner, a font swap, the browser going full-screen. Guarded on an actual
+   height change, because re-rendering is itself a resize of the observed element
+   and would otherwise loop forever. */
+let lastContentHeight = 0;
+if (window.ResizeObserver) {
+  const contentEl = document.getElementById("content");
+  if (contentEl) {
+    new ResizeObserver((entries) => {
+      const height = Math.round(entries[0].contentRect.height);
+      if (Math.abs(height - lastContentHeight) < 8) return;
+      lastContentHeight = height;
+      scheduleRelayout();
+    }).observe(contentEl);
+  }
+}
 
 async function post(path, body) {
   const resp = await fetch(path, {

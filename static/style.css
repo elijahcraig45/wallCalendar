@@ -3066,6 +3066,82 @@ textarea.text-input {
   line-height: 1.35;
 }
 
+/* ---------- severe weather banner ---------- */
+
+/* Fixed and above the dimming overlay: this has to be visible at 2am, which is
+   when it matters most and when a black overlay would otherwise cover it. */
+#alert-banner {
+  /* `relative`, not `fixed`: it has to occupy space and push the page down. Fixed,
+     it covered the header and swallowed every tap aimed at the clock, the view tabs
+     and the nav - which is how it first shipped, and it took out most of the test
+     suite in one go.
+     A positioned element still stacks, so the z-index below keeps it above
+     #night-dim (3000). That matters because 2am is exactly when a warning counts,
+     and it is also when a black overlay is drawn over everything. */
+  position: relative;
+  flex: 0 0 auto;
+  z-index: 3100;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  background: #b3261e;
+  color: #ffffff;
+  cursor: pointer;
+  /* Not themed. Every other colour here follows the month's palette; a tornado
+     warning is the one thing on this wall that should look the same in every
+     season and never blend in. */
+  box-shadow: 0 3px 14px rgba(0, 0, 0, 0.3);
+}
+
+#alert-banner-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+#alert-banner-event { font-size: 1.15rem; font-weight: 700; }
+#alert-banner-when { font-size: 0.9rem; opacity: 0.9; white-space: nowrap; }
+
+#alert-banner-area {
+  font-size: 0.82rem;
+  opacity: 0.85;
+  /* The county list can run to thirty names; one line of it is context, more is
+     noise, and the full list is a tap away on the weather page. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 46vw;
+}
+
+#alert-banner-dismiss {
+  flex: 0 0 auto;
+  background: rgba(255, 255, 255, 0.18);
+  border: 0;
+  color: #ffffff;
+  font-size: 1.4rem;
+  line-height: 1;
+  /* A deliberately large target: it's a touchscreen, and the failure mode of a
+     small one here is dismissing a warning you meant to read. */
+  padding: 6px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+/* On a short panel the banner is competing with the calendar for scarce height:
+   48px out of 600 is 8% of the screen, and it comes straight off the month rows.
+   Tightened, and the county list drops - the event and the expiry time are what
+   matter, and the full area is one tap away. */
+@media (max-height: 700px) {
+  #alert-banner { padding: 7px 14px; gap: 10px; }
+  #alert-banner-event { font-size: 1rem; }
+  #alert-banner-area { display: none; }
+  #alert-banner-dismiss { padding: 4px 14px; font-size: 1.2rem; }
+}
+
 /* `!important`, and it's the right call for exactly this rule.
 
    .hidden is the one utility the whole app toggles from JavaScript, and source
