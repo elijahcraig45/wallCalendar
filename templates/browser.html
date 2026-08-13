@@ -1,27 +1,48 @@
 {% extends "base.html" %}
 
 {% block topbar %}
-<h1>Browser</h1>
+<h1>Web</h1>
+<div class="topbar-actions">
+  <button id="browser-home" class="pill-button">Clear</button>
+</div>
 {% endblock %}
 
 {% block content %}
+{# Pages are framed, never navigated to. This used to do
+   `window.location.href = url`, which took the whole kiosk browser to that site -
+   and with --kiosk there is no address bar and no back button, so the wall was
+   stranded on whatever was opened until someone rebooted it. Framing keeps the
+   rail on screen, so Calendar is always one tap away. #}
 <div id="browser-view">
   <form id="browser-form">
-    <input id="browser-url" type="text" placeholder="https://example.com/recipe" inputmode="url">
+    <input id="browser-url" type="text" placeholder="example.com/recipe" inputmode="url"
+           autocomplete="off" autocapitalize="off" spellcheck="false">
     <button type="submit">Go</button>
   </form>
+
+  <div id="browser-shortcuts"></div>
+
+  <div id="browser-status" class="hidden"></div>
+
+  <div id="browser-frame-wrap" class="hidden">
+    {# The load-bearing omission is allow-top-navigation: without it a framed page
+       cannot navigate the kiosk away from this app, which is the entire bug being
+       fixed here.
+
+       allow-same-origin IS granted, and has to be - it lets the framed site be
+       its own origin, which anything real needs for storage and service workers
+       (Daisy's Kitchen is a Flutter app and renders a blank white box without
+       it). It does not give the frame access to *this* app: the framed page is
+       cross-origin, so normal same-origin policy still walls it off, and
+       browser_service refuses loopback/private addresses, so nobody can point
+       the frame back at this server and defeat that. #}
+    <iframe id="browser-frame" title="Web page"
+            referrerpolicy="no-referrer"
+            sandbox="allow-scripts allow-forms allow-same-origin"></iframe>
+  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script>
-  document.getElementById("browser-form").addEventListener("submit", (e) => {
-    e.preventDefault();
-    let url = document.getElementById("browser-url").value.trim();
-    if (!/^https?:\/\//i.test(url)) {
-      url = "https://" + url;
-    }
-    window.location.href = url;
-  });
-</script>
+<script src="/static/browser.js"></script>
 {% endblock %}

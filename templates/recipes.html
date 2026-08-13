@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block topbar %}
+<h1 id="recipes-title">Recipes</h1>
+<div class="topbar-actions">
+  <button id="recipes-back" class="pill-button hidden">&#8249;&nbsp; All recipes</button>
+  <button id="cook-start" class="pill-button pill-button--accent hidden">Cook</button>
+  <button id="cook-exit" class="pill-button hidden">Done cooking</button>
+</div>
+{% endblock %}
+
+{% block content %}
+{# Read straight from Daisy's Kitchen's Firestore (public read), not framed - which
+   is what allows a wall-appropriate presentation: big type, ingredients and steps
+   side by side, and a hands-free cooking mode that can start a kitchen timer. The
+   deployed Flutter app is still reachable from the Web page. #}
+<div id="recipes-view">
+  <div id="recipes-browse">
+    <div id="recipes-filters"></div>
+    <div id="recipes-grid"></div>
+    <p id="recipes-note" class="field-hint"></p>
+  </div>
+
+  <div id="recipe-detail" class="hidden">
+    <div id="recipe-detail-head"></div>
+    <div id="recipe-detail-body">
+      <section id="recipe-ingredients"></section>
+      <section id="recipe-steps"></section>
+    </div>
+  </div>
+
+  {# Cooking mode: one step at a time, as large as the panel allows, because the
+     reader is across the counter with their hands covered in flour. #}
+  <div id="cook-mode" class="hidden">
+    <div id="cook-progress"></div>
+    <div id="cook-step"></div>
+    <div id="cook-controls">
+      <button id="cook-prev" class="pill-button">Back</button>
+      <button id="cook-timer" class="pill-button hidden"></button>
+      <button id="cook-next" class="pill-button pill-button--accent">Next step</button>
+    </div>
+    <ul id="cook-ingredients"></ul>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/recipes.js"></script>
+{% endblock %}

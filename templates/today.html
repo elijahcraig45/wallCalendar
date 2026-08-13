@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block topbar %}
+<h1 id="today-heading"></h1>
+<div class="topbar-actions">
+  <a href="/" class="pill-button">Full calendar</a>
+</div>
+{% endblock %}
+
+{% block content %}
+{# The morning screen: everything you'd want on the way out of the door, without
+   navigating. Composed from the existing endpoints - it adds no new server data,
+   which is why it can't drift out of step with the pages it summarises. #}
+<div id="today-view">
+  <section id="today-primary">
+    <div id="today-weather"></div>
+    <div id="today-schedule">
+      <h3>Today</h3>
+      <ul id="today-events"></ul>
+    </div>
+  </section>
+
+  <section id="today-secondary">
+    <div id="today-notes-block">
+      <h3>On the list</h3>
+      <ul id="today-notes"></ul>
+    </div>
+    <div id="today-next-block">
+      <h3>Coming up</h3>
+      <ul id="today-next"></ul>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/today.js"></script>
+{% endblock %}
