@@ -192,18 +192,32 @@ test.describe("multi-day events and colours", () => {
       }));
     });
 
-    // "Grandma visiting" is a six-day fixture; it must be a single wide bar, not
-    // six chips.
-    const grandma = bars.filter((b) => b.title === "Grandma visiting");
-    expect(grandma.length, "Grandma visiting should be one bar in its week").toBe(1);
-    expect(grandma[0].days, "not spanning multiple days").toBeGreaterThan(3);
+    /* Asserted by total span rather than bar count, because the fixtures are offsets
+       from TODAY: which events cross a Saturday->Sunday boundary changes daily, so a
+       hard-coded "exactly one bar" is only true on some days of the week. This test
+       failed the morning the date rolled over — the rendering was right and the
+       assertion was a coincidence.
 
-    // "Asheville trip" deliberately crosses a Sat->Sun boundary, so it must split
-    // into two bars whose touching ends are squared off rather than rounded.
-    const asheville = bars.filter((b) => b.title === "Asheville trip");
-    expect(asheville.length, "week-crossing event should split into two bars").toBe(2);
-    expect(asheville.some((b) => b.openRight), "first half should run off the week edge").toBe(true);
-    expect(asheville.some((b) => b.openLeft), "second half should continue from the previous week").toBe(true);
+       The invariants that actually matter: a multi-day event spans, it never becomes
+       per-day chips, its widths add up to its length, and where it does split across
+       week rows the touching ends are squared off. */
+    const grandma = bars.filter((b) => b.title === "Grandma visiting");
+    expect(grandma.length, "Grandma visiting is missing entirely").toBeGreaterThan(0);
+    expect(grandma.length, "a 6-day event cannot need more than two week rows")
+      .toBeLessThanOrEqual(2);
+    expect(
+      grandma.reduce((total, b) => total + b.days, 0),
+      "the bars should add up to the fixture's six days",
+    ).toBe(6);
+
+    // Whenever anything is split, the cut ends must be marked so they render squared
+    // rather than rounded — that is what makes it read as one event across two rows.
+    for (const title of new Set(bars.map((b) => b.title))) {
+      const parts = bars.filter((b) => b.title === title);
+      if (parts.length < 2) continue;
+      expect(parts.some((b) => b.openRight), `${title}: no bar runs off a week edge`).toBe(true);
+      expect(parts.some((b) => b.openLeft), `${title}: no bar continues a previous week`).toBe(true);
+    }
 
     // Nothing all-day should still be rendering as a per-day pill.
     const allDayPills = await page.locator(".event-pill:not(.event-pill--timed)").count();

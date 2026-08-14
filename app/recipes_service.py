@@ -16,7 +16,18 @@ import requests
 
 from app.config import DEMO_MODE, RECIPES_PROJECT_ID
 
-BASE_URL = "https://firestore.googleapis.com/v1/projects/{project}/databases/(default)/documents/recipes"
+# :runQuery rather than the documents.list endpoint, because a filter is now mandatory.
+#
+# Daisy's Kitchen scopes recipes by `visibility`, and Firestore rejects any query that
+# *could* return a document the caller may not read — it does not quietly filter. This
+# client is unauthenticated, so listing the collection is refused outright and the query
+# has to say `visibility == "public"`. documents.list takes no filter at all, hence the
+# change of endpoint rather than an extra parameter.
+QUERY_URL = (
+    "https://firestore.googleapis.com/v1/projects/{project}"
+    "/databases/(default)/documents:runQuery"
+)
+PAGE_SIZE = 100
 TIMEOUT_SECONDS = 10
 CACHE_TTL_SECONDS = 1800   # recipes change rarely; no reason to refetch often
 ERROR_CACHE_TTL_SECONDS = 120
@@ -111,20 +122,49 @@ def _shape(document: dict) -> dict:
     }
 
 
+def _query_body(offset: int) -> dict:
+    return {
+        "structuredQuery": {
+            "from": [{"collectionId": "recipes"}],
+            "where": {
+                "fieldFilter": {
+                    "field": {"fieldPath": "visibility"},
+                    "op": "EQUAL",
+                    "value": {"stringValue": "public"},
+                }
+            },
+            # Ordered so paging by offset is stable. Needs the
+            # visibility/createdAt composite index in the app's
+            # firestore.indexes.json; without it this is a 400, not a slow query.
+            "orderBy": [
+                {"field": {"fieldPath": "createdAt"}, "direction": "DESCENDING"}
+            ],
+            "offset": offset,
+            "limit": PAGE_SIZE,
+        }
+    }
+
+
 def _fetch() -> dict:
-    recipes, page_token = [], None
+    recipes, offset = [], 0
     while True:
-        response = requests.get(
-            BASE_URL.format(project=RECIPES_PROJECT_ID),
-            params={"pageSize": 100, **({"pageToken": page_token} if page_token else {})},
+        response = requests.post(
+            QUERY_URL.format(project=RECIPES_PROJECT_ID),
+            json=_query_body(offset),
             timeout=TIMEOUT_SECONDS,
         )
         response.raise_for_status()
-        payload = response.json()
-        recipes.extend(_shape(doc) for doc in payload.get("documents", []))
-        page_token = payload.get("nextPageToken")
-        if not page_token:
+
+        # runQuery answers with a list of {document, readTime} rather than
+        # {"documents": [...]}, and an empty result set is a single entry carrying a
+        # readTime and no document at all.
+        rows = response.json()
+        documents = [row["document"] for row in rows if isinstance(row, dict) and "document" in row]
+        recipes.extend(_shape(doc) for doc in documents)
+
+        if len(documents) < PAGE_SIZE:
             break
+        offset += PAGE_SIZE
 
     recipes.sort(key=lambda r: r["title"].lower())
     categories = sorted({r["category"] for r in recipes if r["category"]})
