@@ -27,6 +27,18 @@ QUERY_URL = (
     "https://firestore.googleapis.com/v1/projects/{project}"
     "/databases/(default)/documents:runQuery"
 )
+# The pre-visibility endpoint, kept as a fallback. It takes no filter, so it only works
+# while the recipe rules are still permissive - but that is exactly the window where the
+# filtered query cannot work either, because the composite index may not exist yet and
+# no recipe carries `visibility` until the migration runs.
+#
+# Trying the filter first and falling back means this file is safe to deploy at any point
+# in that sequence, in either order. The alternative was a documented deploy order, and a
+# documented order is one accidental push away from a blank Recipes page.
+LIST_URL = (
+    "https://firestore.googleapis.com/v1/projects/{project}"
+    "/databases/(default)/documents/recipes"
+)
 PAGE_SIZE = 100
 TIMEOUT_SECONDS = 10
 CACHE_TTL_SECONDS = 1800   # recipes change rarely; no reason to refetch often
@@ -145,8 +157,9 @@ def _query_body(offset: int) -> dict:
     }
 
 
-def _fetch() -> dict:
-    recipes, offset = [], 0
+def _fetch_public() -> list[dict]:
+    """Public recipes via :runQuery. Raises if the index is missing or rules refuse."""
+    documents, offset = [], 0
     while True:
         response = requests.post(
             QUERY_URL.format(project=RECIPES_PROJECT_ID),
@@ -159,13 +172,53 @@ def _fetch() -> dict:
         # {"documents": [...]}, and an empty result set is a single entry carrying a
         # readTime and no document at all.
         rows = response.json()
-        documents = [row["document"] for row in rows if isinstance(row, dict) and "document" in row]
-        recipes.extend(_shape(doc) for doc in documents)
+        page = [row["document"] for row in rows if isinstance(row, dict) and "document" in row]
+        documents.extend(page)
 
-        if len(documents) < PAGE_SIZE:
+        if len(page) < PAGE_SIZE:
             break
         offset += PAGE_SIZE
+    return documents
 
+
+def _fetch_all_unfiltered() -> list[dict]:
+    """Every recipe via documents.list. Only works while the rules are permissive."""
+    documents, page_token = [], None
+    while True:
+        response = requests.get(
+            LIST_URL.format(project=RECIPES_PROJECT_ID),
+            params={"pageSize": PAGE_SIZE, **({"pageToken": page_token} if page_token else {})},
+            timeout=TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+        payload = response.json()
+        documents.extend(payload.get("documents", []))
+        page_token = payload.get("nextPageToken")
+        if not page_token:
+            break
+    return documents
+
+
+def _fetch() -> dict:
+    """Filtered query first, unfiltered list as a fallback.
+
+    Both are needed because the app's migration to per-recipe visibility is a sequence,
+    and this has to keep working at every point in it: before the index exists the
+    filtered query is a 400, before the migration runs it legitimately matches nothing,
+    and after the rules tighten the unfiltered list is refused. Whichever one can work,
+    does.
+    """
+    documents: list[dict] = []
+    try:
+        documents = _fetch_public()
+    except requests.exceptions.RequestException as exc:
+        # Most likely FAILED_PRECONDITION for a missing composite index.
+        print(f"recipes: filtered query unavailable ({exc}); trying the unfiltered list")
+
+    if not documents:
+        documents = _fetch_all_unfiltered()
+
+    recipes = [_shape(doc) for doc in documents]
     recipes.sort(key=lambda r: r["title"].lower())
     categories = sorted({r["category"] for r in recipes if r["category"]})
     return {"recipes": recipes, "categories": categories, "errors": []}

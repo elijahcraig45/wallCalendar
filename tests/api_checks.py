@@ -12,6 +12,8 @@ arithmetic that shouldn't need a browser to verify.
 """
 
 import datetime as dt
+
+import requests
 import os
 import pathlib
 import sys
@@ -623,6 +625,51 @@ def check_shell_subscriptions_come_last():
         )
 
 
+
+def check_recipes_fetch_survives_the_visibility_migration():
+    """The recipe fetch has to work at every point in Daisy's Kitchen's migration to
+    per-recipe visibility, because that migration is a sequence and this wall is a
+    separate deploy.
+
+    Before the composite index exists the filtered query is a 400; before the migration
+    runs it legitimately matches nothing; after the rules tighten the unfiltered list is
+    refused. The original plan was a documented deploy order, which is one accidental push
+    away from a blank Recipes page.
+    """
+    print("recipes fetch across the migration")
+    from unittest.mock import patch
+    from app import recipes_service
+
+    doc = {
+        "name": "projects/p/databases/(default)/documents/recipes/abc",
+        "fields": {"title": {"stringValue": "Lemon Orzo"}},
+    }
+
+    # 1. Index missing: the filtered query fails, the unfiltered list answers.
+    with patch.object(recipes_service, "_fetch_public",
+                      side_effect=requests.exceptions.HTTPError("400")), \
+         patch.object(recipes_service, "_fetch_all_unfiltered", return_value=[doc]) as fallback:
+        result = recipes_service._fetch()
+    check("a missing index falls back to the unfiltered list",
+          len(result["recipes"]) == 1 and fallback.called)
+
+    # 2. Index exists but nothing is migrated yet: no match, so fall back rather than
+    #    render an empty cookbook.
+    with patch.object(recipes_service, "_fetch_public", return_value=[]), \
+         patch.object(recipes_service, "_fetch_all_unfiltered", return_value=[doc]) as fallback:
+        result = recipes_service._fetch()
+    check("an empty filtered result falls back rather than showing nothing",
+          len(result["recipes"]) == 1 and fallback.called)
+
+    # 3. Fully migrated: the filtered query answers and the fallback is never called,
+    #    which matters because after the rules tighten it would be refused.
+    with patch.object(recipes_service, "_fetch_public", return_value=[doc]), \
+         patch.object(recipes_service, "_fetch_all_unfiltered") as fallback:
+        result = recipes_service._fetch()
+    check("a successful filtered query does not touch the unfiltered list",
+          len(result["recipes"]) == 1 and not fallback.called)
+
+
 def main():
     os.environ.setdefault("FLASK_SECRET_KEY", "api-checks")
     for fn in (
@@ -634,6 +681,7 @@ def main():
         check_hidden_utility_is_unconditional,
         check_weather_alerts_parsing,
         check_weather_hourly_is_anchored_to_now,
+        check_recipes_fetch_survives_the_visibility_migration,
         check_air_quality_and_pollen,
         check_radar_regions_are_verified,
         check_google_pollen_parsing,
