@@ -12,6 +12,7 @@ from app import (
     browser_service,
     calendar_service,
     demo_data,
+    groceries_service,
     preferences,
     recipes_service,
     spotify_service,
@@ -450,6 +451,54 @@ def recipes_page():
 @app.route("/api/recipes")
 def api_recipes():
     return jsonify(recipes_service.get_recipes())
+
+
+@app.route("/groceries")
+def groceries_page():
+    return render_template("groceries.html")
+
+
+@app.route("/api/groceries")
+def api_groceries():
+    # Never raises - see groceries_service.get_groceries(). An unconfigured or
+    # unreachable list is a state in the payload, not an error, so the Today page
+    # can carry the block without risking the rest of the screen.
+    return jsonify(groceries_service.get_groceries())
+
+
+@app.route("/api/groceries/add", methods=["POST"])
+def api_groceries_add():
+    return jsonify(groceries_service.add_item((request.json or {}).get("text", "")))
+
+
+@app.route("/api/groceries/<item_id>/done", methods=["POST"])
+def api_groceries_done(item_id):
+    return jsonify(groceries_service.set_done(item_id, bool((request.json or {}).get("done"))))
+
+
+@app.route("/api/groceries/<item_id>/delete", methods=["POST"])
+def api_groceries_delete(item_id):
+    groceries_service.remove(item_id)
+    return jsonify({"ok": True})
+
+
+@app.route("/api/groceries/clear-done", methods=["POST"])
+def api_groceries_clear_done():
+    return jsonify({"ok": True, "cleared": groceries_service.clear_done()})
+
+
+# get_groceries() swallows these, but every write path above raises them, and
+# without handlers they would reach Flask's HTML 500 page - which the client then
+# parses as JSON, turning a clear message into "Unexpected token '<'". Same bug
+# the requests.HTTPError handler above exists for.
+@app.errorhandler(groceries_service.GroceriesNotConfigured)
+def handle_groceries_not_configured(e):
+    return jsonify({"error": str(e), "configured": False}), 503
+
+
+@app.errorhandler(groceries_service.GroceriesUnavailable)
+def handle_groceries_unavailable(e):
+    return jsonify({"error": str(e)}), 503
 
 
 @app.route("/api/weather")

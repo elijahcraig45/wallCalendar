@@ -36,7 +36,7 @@ for (const vp of VIEWPORTS) {
        the NEXT page catches it - a failure with nothing wrong with the page named
        in the message. Error listeners also accumulated across iterations. */
     test("every page renders clean in the shell", async ({ context }) => {
-      for (const target of ["/today", "/weather", "/recipes"]) {
+      for (const target of ["/today", "/weather", "/recipes", "/groceries"]) {
         const page = await context.newPage();
         const problems = [];
         page.on("pageerror", (e) => problems.push(`${target} pageerror: ${e.message}`));
@@ -45,9 +45,11 @@ for (const vp of VIEWPORTS) {
         });
         await page.goto(target);
         await page.waitForTimeout(1200);
-        // 7 destinations now that Weather has its own page; the rail still has
-        // to fit a 600px panel, which is what the overflow check below is for.
-        await expect(page.locator(".rail-item")).toHaveCount(7);
+        // 8 destinations now that Groceries has a page; the rail still has to fit a
+        // 600px panel, which is what the overflow check below is for. That check is
+        // the reason this count is worth asserting - an eighth entry was the one
+        // most likely to push the rail over.
+        await expect(page.locator(".rail-item")).toHaveCount(8);
         const railFits = await page.evaluate(() => {
           const rail = document.getElementById("rail");
           return rail.scrollHeight <= rail.clientHeight + 1;
@@ -65,7 +67,7 @@ for (const vp of VIEWPORTS) {
 test.describe("today overview", () => {
   test.use({ viewport: { width: 1920, height: 1080 } });
 
-  test("composes weather, today's events, notes and the week", async ({ page }) => {
+  test("composes weather, today's events, the week and the list", async ({ page }) => {
     await page.goto("/today");
     await expect(page.locator(".today-weather-temp")).toHaveText(/^-?\d+°$/);
     // The fixtures put 9 events on today.
@@ -76,6 +78,210 @@ test.describe("today overview", () => {
     // people ask the wall.
     const dimmed = await page.locator(".today-event--past").count();
     expect(dimmed, "nothing marked past despite morning fixtures").toBeGreaterThan(0);
+
+    // The hourly strip, and the grocery list: the two blocks added because the page
+    // left most of a 1080px panel as empty ground.
+    expect(await page.locator(".today-hour").count()).toBeGreaterThan(3);
+    await expect(page.locator(".today-hour--now .today-hour-when")).toHaveText("Now");
+    expect(await page.locator(".today-grocery-aisle").count()).toBeGreaterThan(1);
+    // Grouped, not a flat list: the aisle label is what makes it scannable.
+    await expect(page.locator(".today-grocery-aisle .today-grocery-label").first())
+      .not.toBeEmpty();
+
+    // Air quality and pollen, which used to be on /weather only.
+    const air = page.locator("#today-air");
+    await expect(air).toContainText("Moderate");
+    /* The scale has to travel with the pollen number. pollen.com runs 0-12 and
+       Google 0-5, so a bare "7.6" is meaningless - and mis-colouring or
+       mis-labelling across the two scales is a bug /weather already has tests for. */
+    await expect(air).toContainText("of 12");
+    await expect(air).toContainText("Medium-high");
+  });
+
+  /* Both hour-strip tests pin the clock to a time on TODAY's date rather than to a
+     fixed timestamp. demo_weather generates its 48 hourly entries from the real
+     current date, and the strip matches on the whole `YYYY-MM-DDTHH` prefix - so a
+     hardcoded date puts the fake clock in a different day from the fixture and the
+     strip renders from the fixture's first hour whatever the time says. That is a
+     test-only trap: it looked like the anchoring was broken when it wasn't. */
+  const todayAt = (hour, minute) => {
+    const when = new Date();
+    when.setHours(hour, minute, 0, 0);
+    return when;
+  };
+
+  /* The strip must start at the current hour. The hourly series begins at local
+     midnight, so slicing from index 0 shows this morning's weather at teatime -
+     the same trap weather_service._next_hours exists to avoid server-side. */
+  test("the hourly strip starts now, not at midnight", async ({ page }) => {
+    await page.clock.install({ time: todayAt(16, 30) });
+    await page.goto("/today");
+    await expect(page.locator(".today-hour").first()).toBeVisible();
+
+    const labels = await page.locator(".today-hour-when").allTextContents();
+    expect(labels[0]).toBe("Now");
+    // 4:30pm, so the next labelled cell is 5pm - not 1am.
+    expect(labels[1], `strip reads ${labels.join(" ")}`).toBe("5pm");
+  });
+
+  /* Caught on screen: at 3:34pm the strip ran 3pm…11pm and then showed "3pm"
+     again. The hourly series spans two days, so filtering on the hour NUMBER also
+     matched tomorrow's 3pm once today ran out of hours. It has to cross midnight
+     into 12am instead. */
+  test("the hourly strip crosses midnight instead of jumping back", async ({ page }) => {
+    await page.clock.install({ time: todayAt(22, 30) });
+    await page.goto("/today");
+    await expect(page.locator(".today-hour").first()).toBeVisible();
+
+    const labels = await page.locator(".today-hour-when").allTextContents();
+    expect(labels.slice(0, 4), `strip reads ${labels.join(" ")}`)
+      .toEqual(["Now", "11pm", "12am", "1am"]);
+    // And no hour may be revisited, which is what the bug looked like on screen.
+    expect(new Set(labels).size, `duplicate hours in ${labels.join(" ")}`)
+      .toBe(labels.length);
+  });
+});
+
+test.describe("groceries", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  /* Grouping is the point of this page, and it's a contract with the phone app
+     rather than a preference: both walk the shop in IngredientParser.aisleOrder. */
+  test("groups by aisle in store order", async ({ page }) => {
+    await page.goto("/groceries");
+    await expect(page.locator(".groc-aisle").first()).toBeVisible();
+
+    const aisles = await page.locator(".groc-aisle").evaluateAll((nodes) =>
+      nodes.map((n) => n.dataset.aisle)
+    );
+    const order = ["produce", "bakery", "meat", "seafood", "dairy", "frozen",
+                   "pantry", "spices", "drinks", "household", "other"];
+    const positions = aisles.map((a) => order.indexOf(a));
+    expect(positions, `aisles rendered as ${aisles.join(", ")}`)
+      .toEqual([...positions].sort((a, b) => a - b));
+
+    // Quantities come pre-rendered from the app precisely so the wall needs no
+    // parser; if they were dropped the list would say "orzo" with no amount.
+    expect(await page.locator(".groc-qty").count()).toBeGreaterThan(2);
+    // And which recipe put it there.
+    await expect(page.locator(".groc-source").first()).toContainText("for ");
+  });
+
+  /* Every aisle card must carry its own heading, at both panel sizes.
+
+     This caught a real bug rather than guarding a hypothetical one. The first layout
+     used CSS columns, which fill the height before moving across - but a
+     multi-column container with a constrained height fragments a card taller than
+     the column, and `break-inside: avoid` cannot help because there is nowhere else
+     to put it. On the 600px panel the seven-item Produce card split and the overflow
+     rendered as a heading-less card, which reads as a different aisle entirely.
+
+     Measured, not inspected, and that distinction is the whole test. Fragmentation
+     is a PAINT effect: the card stays one element in the DOM and keeps its heading
+     there, so "every .groc-aisle has a .groc-aisle-head" passes happily while the
+     screen shows a headingless block. The visible symptom is that the card's own
+     rows end up in two different columns, so the thing to check is that every row
+     of one aisle shares its left edge. Verified against the broken layout. */
+  for (const vp of [{ w: 1024, h: 600 }, { w: 1920, h: 1080 }]) {
+    test(`no aisle card is split across columns at ${vp.w}x${vp.h}`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.w, height: vp.h });
+      await page.goto("/groceries");
+      await expect(page.locator(".groc-aisle").first()).toBeVisible();
+
+      const split = await page.locator(".groc-aisle").evaluateAll((nodes) =>
+        nodes
+          .map((node) => {
+            const rows = [...node.querySelectorAll(".groc-row")];
+            const lefts = rows.map((r) => Math.round(r.getBoundingClientRect().left));
+            const head = node.querySelector(".groc-aisle-head").getBoundingClientRect();
+            return {
+              aisle: node.dataset.aisle,
+              columns: [...new Set(lefts)],
+              // A row painted above its own heading is the other tell.
+              rowsAboveHeading: rows.filter(
+                (r) => r.getBoundingClientRect().top < head.top - 1
+              ).length,
+            };
+          })
+          .filter((card) => card.columns.length > 1 || card.rowsAboveHeading > 0)
+      );
+
+      expect(
+        split,
+        `aisle cards fragmented across a column break (rows in >1 column): ` +
+          JSON.stringify(split)
+      ).toEqual([]);
+      // Guard against the assertion passing because nothing rendered.
+      expect(await page.locator(".groc-aisle").count()).toBeGreaterThan(3);
+    });
+  }
+
+  test("ticks off, sinks to the trolley, and clears", async ({ page }) => {
+    await page.goto("/groceries");
+    await expect(page.locator(".groc-aisle").first()).toBeVisible();
+
+    const firstName = await page.locator(".groc-aisle .groc-name").first().textContent();
+    const openBefore = await page.locator(".groc-aisle .groc-row").count();
+
+    await page.locator(".groc-aisle .groc-check").first().click();
+
+    /* It has to leave the aisle AND appear under "In the trolley" - the whole
+       reason done items sink rather than vanish is that "did I get that?" is a
+       question people ask a list mid-shop. */
+    await expect.poll(() => page.locator(".groc-aisle .groc-row").count())
+      .toBe(openBefore - 1);
+    await expect(page.locator("#groc-done-block")).toBeVisible();
+    await expect(page.locator("#groc-done")).toContainText(firstName);
+
+    // Struck through, not merely flagged.
+    const struck = await page.locator("#groc-done .groc-row").first()
+      .locator(".groc-name")
+      .evaluate((el) => getComputedStyle(el).textDecorationLine);
+    expect(struck).toContain("line-through");
+
+    await page.locator("#groc-clear").click();
+    await expect(page.locator("#groc-done-block")).toBeHidden();
+  });
+
+  test("adds a typed item into the right aisle", async ({ page }) => {
+    await page.goto("/groceries");
+    await expect(page.locator(".groc-aisle").first()).toBeVisible();
+
+    /* "2 cucumbers" rather than "2 lemons": the fixture already carries lemons, and
+       matching the first "lemons" row asserted against the fixture's own quantity
+       instead of the typed one - a test that passes whatever add does. Deliberately
+       something no fixture contains.
+
+       A bare count also has to survive the quantity split: "cucumbers" must not be
+       read as the unit, or the name is lost. */
+    await page.fill("#groc-input", "2 cucumbers");
+    await page.press("#groc-input", "Enter");
+
+    const produce = page.locator('.groc-aisle[data-aisle="produce"]');
+    const row = produce.locator(".groc-row", { hasText: "cucumbers" });
+    await expect(row).toHaveCount(1);
+    await expect(row.locator(".groc-name")).toHaveText("cucumbers");
+    await expect(row.locator(".groc-qty")).toHaveText("2");
+  });
+
+  /* The credential is optional, and on a fresh install it is absent. That state has
+     to explain itself and say the list still works on a phone - not look broken. */
+  test("explains itself when the wall has no credential", async ({ page }) => {
+    await page.route("**/api/groceries", (route) =>
+      route.fulfill({
+        json: {
+          items: [], groups: [], available: false, configured: false,
+          open_count: 0, done_count: 0,
+          errors: ["The grocery list needs a service-account key for the recipes project."],
+        },
+      })
+    );
+    await page.goto("/groceries");
+    await expect(page.locator("#groc-setup")).toBeVisible();
+    await expect(page.locator("#groc-setup")).toContainText("service-account key");
+    await expect(page.locator("#groc-setup")).toContainText("still on your phone");
+    // No point offering an add box that cannot work.
+    await expect(page.locator("#groc-form")).toBeHidden();
   });
 });
 
@@ -451,7 +657,7 @@ test.describe("light-theme contrast sweep", () => {
 
   const findOffenders = (page) => page.evaluate(measure);
 
-  for (const target of ["/", "/today", "/weather", "/recipes", "/browser", "/accounts", "/spotify"]) {
+  for (const target of ["/", "/today", "/weather", "/recipes", "/groceries", "/browser", "/accounts", "/spotify"]) {
     test(`no unreadable text on ${target}`, async ({ page }) => {
       await page.goto(target);
       await page.waitForTimeout(1600);

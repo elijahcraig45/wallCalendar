@@ -21,9 +21,16 @@
       <div id="today-next-up"></div>
       <div id="today-weather"></div>
       <div id="today-forecast"></div>
+      {# Air quality and pollen. Both matter more than the temperature for deciding
+         whether to open the windows, and in an Atlanta summer the pollen count is
+         the number people actually ask about. Lived only on /weather before. #}
+      <div id="today-air"></div>
     </div>
     <div id="today-schedule">
       <h3>Today</h3>
+      {# The next twelve hours, from the payload weather.js has already fetched -
+         "do I need a coat at 4pm" without opening the weather page. #}
+      <div id="today-hours"></div>
       <ul id="today-events"></ul>
     </div>
   </section>
@@ -32,6 +39,13 @@
     <div id="today-next-block">
       <h3>Coming up</h3>
       <ul id="today-next"></ul>
+    </div>
+    {# The household list out of Daisy's Kitchen. Read-only here on purpose: this
+       is the glance surface, and ticking things off belongs on /groceries where
+       the tap targets are sized for it. #}
+    <div id="today-groceries-block">
+      <h3>Groceries <a href="/groceries" class="today-more">Open</a></h3>
+      <ul id="today-groceries"></ul>
     </div>
   </section>
 </div>

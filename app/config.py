@@ -81,6 +81,22 @@ POLLEN_API_KEY = os.environ.get("WALLCAL_POLLEN_KEY") or None
 # configuration needed - no API key, no service account, nothing secret.
 RECIPES_PROJECT_ID = os.environ.get("WALLCAL_RECIPES_PROJECT", "recipe-f644f")
 
+# The grocery list, from the same app - but unlike recipes it is NOT public. Its
+# rules are `signedIn() && sharesHousehold(...)`, so a keyless GET is refused and
+# this needs a real credential: a service account on the recipes project with
+# roles/datastore.user. A service-account token is admin access, so Firestore
+# rules do not apply to it and no household membership has to be plumbed through.
+#
+# Optional on purpose, in the same way POLLEN_API_KEY is: without the key the
+# Groceries page renders an explained "not set up" state instead of failing, and
+# every other page is unaffected. See app/groceries_service.py for the setup steps.
+GROCERY_SA_FILE = Path(
+    os.environ.get("WALLCAL_GROCERY_SA_FILE", str(SECRETS_DIR / "recipes_service_account.json"))
+)
+# Which household's list to show. Discovered automatically when the project has
+# exactly one list, so this only has to be set for a multi-household project.
+GROCERY_HOUSEHOLD_ID = os.environ.get("WALLCAL_HOUSEHOLD_ID") or None
+
 # How many people the fixtures pretend are signed in. Defaults to 2 to
 # exercise per-person colors, but 1 is the state the real wall is in today
 # (a single signed-in account), so both are worth being able to render.

@@ -124,7 +124,7 @@ def check_no_global_script_collisions():
     static = pathlib.Path(__file__).resolve().parent.parent / "static"
     shell = ["panel.js", "themes.js", "weather.js", "nav.js", "timers.js"]
     pages = ["calendar.js", "spotify.js", "recipes.js", "today.js",
-             "browser.js", "accounts.js"]
+             "browser.js", "accounts.js", "groceries.js"]
     patterns = (
         re.compile(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\("),
         re.compile(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*="),
@@ -670,6 +670,221 @@ def check_recipes_fetch_survives_the_visibility_migration():
           len(result["recipes"]) == 1 and not fallback.called)
 
 
+def check_groceries_degrade_without_a_credential():
+    """The grocery list is the one feature here that needs a credential the wall may
+    not have yet, so "not set up" has to be a rendered state rather than a failure.
+
+    Two separate things are checked because they fail differently: the read must
+    answer 200 with the explanation in the payload (the Today page carries this
+    block and must not lose the rest of the screen over it), while a write must
+    answer JSON - an unhandled RuntimeError would reach Flask's HTML 500 page and
+    the client would report "Unexpected token '<'" instead of the real reason.
+    """
+    print("groceries without a credential")
+    import server
+    from app import groceries_service
+
+    client = server.app.test_client()
+    missing = pathlib.Path("/nonexistent/service_account.json")
+
+    with patch.object(groceries_service, "DEMO_MODE", False), \
+         patch.object(groceries_service, "GROCERY_SA_FILE", missing):
+        resp = client.get("/api/groceries")
+        payload = resp.get_json()
+        check(
+            "the read answers 200 with an explanation, not an error",
+            resp.status_code == 200
+            and payload["available"] is False
+            and payload["configured"] is False
+            and payload["items"] == []
+            and payload["errors"],
+            f"got {resp.status_code} {payload}",
+        )
+
+        for path in ("/api/groceries/add", "/api/groceries/clear-done"):
+            resp = client.post(path, json={"text": "milk"})
+            check(
+                f"{path} explains itself as JSON",
+                resp.status_code == 503 and "error" in (resp.get_json() or {}),
+                f"got {resp.status_code} {resp.content_type}",
+            )
+
+
+def check_grocery_ordering_and_grouping():
+    """Aisle order and the rule that ticked items sink rather than vanish.
+
+    Both are contracts with the phone app, not preferences: R3.6 says the list is
+    grouped in a consistent store order, and GroceryService.watchItems sorts
+    exactly this way. A wall that walked the shop backwards would be useless next
+    to the same list on a phone.
+    """
+    print("grocery ordering and grouping")
+    from app import groceries_service
+
+    items = sorted(
+        [
+            {"id": "a", "display": "orzo", "aisle": "pantry", "done": False},
+            {"id": "b", "display": "milk", "aisle": "dairy", "done": False},
+            {"id": "c", "display": "apples", "aisle": "produce", "done": False},
+            {"id": "d", "display": "avocado", "aisle": "produce", "done": False},
+            # Ticked, and in the FIRST aisle - so if done-ness were not the primary
+            # key this would lead the list.
+            {"id": "e", "display": "bananas", "aisle": "produce", "done": True},
+        ],
+        key=groceries_service._sort_key,
+    )
+    check(
+        "unticked items lead, then store order, then alphabetical",
+        [item["id"] for item in items] == ["c", "d", "b", "a", "e"],
+        f"got {[item['id'] for item in items]}",
+    )
+
+    groups = groceries_service._group(items)
+    check(
+        "groups follow the app's aisle order",
+        [group["aisle"] for group in groups] == ["produce", "dairy", "pantry"],
+        f"got {[g['aisle'] for g in groups]}",
+    )
+    check(
+        "a ticked item is not in any aisle group",
+        all(item["id"] != "e" for group in groups for item in group["items"]),
+    )
+
+    # An aisle the app adds later must land in Other rather than disappearing, and
+    # must not raise on the sort's aisleOrder.indexOf.
+    odd = groceries_service._shape(
+        {"name": "x/y/z/unknown", "fields": {"aisle": {"stringValue": "petfood"},
+                                             "display": {"stringValue": "kibble"}}}
+    )
+    check("an unknown aisle falls into Other", odd["aisle"] == "other",
+          f"got {odd['aisle']}")
+    check("...and can still be sorted", isinstance(groceries_service._sort_key(odd), tuple))
+
+
+def check_grocery_parser_matches_the_dart_original():
+    """The wall's canonical-name/aisle port, pinned against Daisy's Kitchen's Dart.
+
+    This exists because of a specific failure mode, not for tidiness. The canonical
+    name is the key GroceryService.addRecipe merges on: if Python decides "tomatoes"
+    is `tomatoes` where Dart says `tomato`, adding a recipe on a phone puts a SECOND
+    tomato row on the list instead of merging into the wall's. So the keyword table
+    and the never-singularise set have to stay identical, and the only way to know
+    they have is to read the Dart.
+
+    Skipped when the recipes repo isn't checked out beside this one - the wall has
+    to build on the Pi, where it isn't.
+    """
+    print("grocery parser vs the Dart original")
+    from app import groceries_service
+
+    dart = (
+        pathlib.Path(__file__).resolve().parent.parent.parent.parent
+        / "recipes" / "lib" / "services" / "ingredient_parser.dart"
+    )
+    if not dart.exists():
+        print(f"  skip  the recipes repo is not checked out at {dart.parent.parent.parent}")
+        return
+
+    source = dart.read_text()
+    import re as _re
+
+    # aisleOrder: a plain list of quoted strings.
+    order_block = source.split("aisleOrder = [", 1)[1].split("];", 1)[0]
+    dart_order = _re.findall(r"'([a-z]+)'", order_block)
+    check(
+        "the aisle order matches, in order",
+        dart_order == groceries_service.AISLE_ORDER,
+        f"dart {dart_order} vs python {groceries_service.AISLE_ORDER}",
+    )
+
+    never_block = source.split("_neverSingularise = {", 1)[1].split("};", 1)[0]
+    check(
+        "the never-singularise set matches",
+        set(_re.findall(r"'([^']+)'", never_block)) == groceries_service.NEVER_SINGULARISE,
+        f"dart-only {set(_re.findall(r'{chr(39)}([^{chr(39)}]+){chr(39)}', never_block)) - groceries_service.NEVER_SINGULARISE}",
+    )
+
+    # Each aisle's keyword list, which is where a silent divergence would actually live.
+    keyword_block = source.split("_aisleKeywords = {", 1)[1]
+    mismatches = []
+    for aisle, expected in groceries_service.AISLE_KEYWORDS.items():
+        segment = keyword_block.split(f"'{aisle}': [", 1)
+        if len(segment) < 2:
+            mismatches.append(f"{aisle}: absent from the Dart")
+            continue
+        dart_words = _re.findall(r"'([^']+)'", segment[1].split("]", 1)[0])
+        if dart_words != expected:
+            only_dart = [w for w in dart_words if w not in expected]
+            only_py = [w for w in expected if w not in dart_words]
+            mismatches.append(f"{aisle}: dart-only {only_dart}, python-only {only_py}")
+    check("every aisle's keywords match the Dart", not mismatches, "; ".join(mismatches))
+
+    # And the behaviour the tables are for. "ground cinnamon" is the case the Dart
+    # carries a comment about: a bare 'ground' keyword made it a meat, because the
+    # first matching aisle wins.
+    for text, canonical, aisle in [
+        ("2 lemons", "lemon", "produce"),
+        ("tomatoes, finely chopped", "tomato", "produce"),
+        ("ground cinnamon", "ground cinnamon", "spices"),
+        ("molasses", "molasses", "pantry"),
+        ("berries", "berry", "produce"),
+        ("olive oil (extra virgin)", "olive oil", "pantry"),
+    ]:
+        _, name = groceries_service._split_amount(text)
+        got = groceries_service._canonical_name(name)
+        check(f"{text!r} canonicalises to {canonical!r}", got == canonical, f"got {got!r}")
+        check(f"...and lands in {aisle}", groceries_service._aisle_for(got) == aisle,
+              f"got {groceries_service._aisle_for(got)}")
+
+    # A quantity typed by a person, and the trap in reading one: "2 lemons" must not
+    # read "lemons" as a unit and lose the name.
+    check("a bare count keeps its name", groceries_service._split_amount("2 lemons") == ("2", "lemons"),
+          f"got {groceries_service._split_amount('2 lemons')}")
+    check("a real unit is separated", groceries_service._split_amount("1 1/2 cups flour") == ("1 1/2 cups", "flour"),
+          f"got {groceries_service._split_amount('1 1/2 cups flour')}")
+
+
+def check_demo_groceries_writes_are_stateful():
+    """The page is only testable if ticking an item actually ticks it - the same
+    reason demo_spotify accepts playback commands."""
+    print("demo grocery writes")
+    from app import demo_groceries
+
+    before = demo_groceries.get_groceries()["open_count"]
+    # Something the fixture does not already contain, on purpose: with a duplicate
+    # name the lookup below can match the FIXTURE's row and assert against its
+    # quantity instead of the added one - a check that passes whatever add does.
+    demo_groceries.add_item("3 zucchini")
+    added = demo_groceries.get_groceries()
+    check("adding an item adds one", added["open_count"] == before + 1,
+          f"{before} -> {added['open_count']}")
+
+    new = [i for i in added["items"] if i["display"] == "zucchini"]
+    check("exactly one row was added", len(new) == 1, f"got {len(new)}")
+    check("...parsed into an aisle with its quantity",
+          new and new[0]["aisle"] == "produce" and new[0]["quantity_label"] == "3",
+          f"got {new}")
+
+    demo_groceries.set_done(new[0]["id"], True)
+    ticked = demo_groceries.get_groceries()
+    check("ticking moves it out of the aisle groups",
+          all(i["id"] != new[0]["id"] for g in ticked["groups"] for i in g["items"]))
+
+    # Still present, and after everything unticked. NOT asserted as the last item:
+    # done items stay sorted by aisle among themselves, so a ticked produce item
+    # legitimately precedes a ticked dairy one.
+    ids = [i["id"] for i in ticked["items"]]
+    open_ids = [i["id"] for i in ticked["items"] if not i["done"]]
+    check("...but it is still on the list, below everything unticked",
+          new[0]["id"] in ids
+          and ids.index(new[0]["id"]) > max(ids.index(i) for i in open_ids),
+          f"order is {[i['display'] for i in ticked['items']]}")
+
+    cleared = demo_groceries.clear_done()
+    check("clearing done removes them", cleared >= 1 and
+          demo_groceries.get_groceries()["done_count"] == 0, f"cleared {cleared}")
+
+
 def main():
     os.environ.setdefault("FLASK_SECRET_KEY", "api-checks")
     for fn in (
@@ -688,6 +903,10 @@ def main():
         check_pollen_key_never_rides_in_a_url,
         check_pollen_provider_fallback,
         check_shell_subscriptions_come_last,
+        check_groceries_degrade_without_a_credential,
+        check_grocery_ordering_and_grouping,
+        check_grocery_parser_matches_the_dart_original,
+        check_demo_groceries_writes_are_stateful,
     ):
         fn()
 

@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block topbar %}
+<h1>Groceries</h1>
+<div class="topbar-actions">
+  <span id="groc-count" class="field-hint"></span>
+  <button id="groc-clear" class="pill-button hidden">Clear ticked</button>
+  <button id="groc-refresh" aria-label="Refresh">
+    <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L14 11h7V4l-3.35 2.35z"/></svg>
+  </button>
+</div>
+{% endblock %}
+
+{% block content %}
+{# The household list out of Daisy's Kitchen, so a tick here shows up on the phone
+   in the shop and vice versa. Grouped by aisle in the app's own store order -
+   `aisle` and a pre-rendered `quantityLabel` are stored on every item precisely so
+   this page needs none of the Dart parser. See app/groceries_service.py. #}
+<div id="groceries-view">
+  <form id="groc-form">
+    <input id="groc-input" class="text-input" type="text"
+           placeholder="Add to the list…" autocomplete="off">
+    <button type="submit" class="pill-button pill-button--accent">Add</button>
+  </form>
+
+  <div id="groc-setup" class="hidden">
+    <p id="groc-setup-text"></p>
+    <p class="field-hint">Until then the list is still on your phone in Daisy's Kitchen.</p>
+  </div>
+
+  <div id="groc-aisles"></div>
+
+  <div id="groc-done-block" class="hidden">
+    <h3>In the trolley</h3>
+    <ul id="groc-done"></ul>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/groceries.js?v={{ build }}"></script>
+{% endblock %}

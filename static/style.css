@@ -2313,21 +2313,32 @@ textarea.text-input {
 .timer-row--done .timer-time { color: var(--spotify-green); }
 .timer-empty { color: var(--text-dim); font-size: 0.9rem; padding: 10px 0; }
 
-/* ---------- notes ---------- */
+/* ---------- groceries ---------- */
 
-#notes-view {
+/* This block replaced the dead Notes styles, which outlived the feature by a
+   commit - Notes was removed but its CSS was not. Nothing referenced them.
+
+   No translucent fills anywhere in here, and that's deliberate rather than
+   stylistic: the light-theme contrast sweep composites backgrounds to measure
+   them, and a tinted surface over the grid-line colour is exactly what made
+   today's calendar cell render as a brown block through two theme rewrites.
+   Everything below sits on --surface or --bg, both solid. */
+
+#groceries-view {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
-  padding: 16px clamp(16px, 6vw, 120px);
+  padding: 16px clamp(16px, 3vw, 48px);
 }
 
-#note-form { display: flex; gap: 8px; flex: 0 0 auto; }
-#note-form #note-input { flex: 1; }
+#groc-form { display: flex; gap: 8px; flex: 0 0 auto; }
+#groc-form #groc-input { flex: 1; }
 
-#notes-reauth {
+#groc-count { white-space: nowrap; }
+
+#groc-setup {
   padding: 14px 16px;
   border-radius: 10px;
   background: #fdf0c8;
@@ -2335,32 +2346,88 @@ textarea.text-input {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 10px;
+  gap: 6px;
 }
 
-#notes-reauth p { margin: 0; line-height: 1.45; }
+#groc-setup p { margin: 0; line-height: 1.45; }
+#groc-setup .field-hint { color: #6b4e00; }
 
-#notes-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+/* A grid with `align-items: start`, and both halves of that are load-bearing.
+
+   `align-items: start` because the default stretches every card to its row's
+   height: a one-item Bakery card came out as tall as a seven-item Produce one,
+   with the dead space inside the card.
+
+   A grid rather than CSS columns, which was the first attempt and looked better
+   until it didn't. Columns fill the height before moving across, which packs
+   nicely - but a multi-column container with a constrained height FRAGMENTS a card
+   that is taller than the column, and `break-inside: avoid` cannot save it because
+   there is nowhere else to put it. On a 600px panel Produce split across the break
+   and its second half rendered as a card with no heading, which reads as a
+   different aisle. Grid tracks never fragment. */
+#groc-aisles {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  display: grid;
+  /* 320px so "for Weeknight Traybake" fits on the line with its item rather than
+     wrapping under it on every recipe-sourced row. */
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 14px;
+  align-content: start;
+  align-items: start;
 }
 
-.note-row {
+.groc-aisle {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 10px 12px 4px;
+}
+
+.groc-aisle-head {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 12px 4px;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.groc-aisle-count {
+  flex: 0 0 auto;
+  background: var(--bg);
+  color: var(--text-dim);
+  border-radius: 20px;
+  padding: 1px 8px;
+  font-size: 0.78rem;
+  letter-spacing: 0;
+}
+
+.groc-aisle ul, #groc-done {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.groc-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 7px 0;
   border-bottom: 1px solid var(--border);
 }
 
-.note-check {
+.groc-aisle li:last-child, #groc-done li:last-child { border-bottom: none; }
+
+/* 34px plus the row padding clears the ~44px a fingertip needs. This is tapped
+   with one hand while carrying something, which is the whole design brief. */
+.groc-check {
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   border-radius: 8px;
   border: 2px solid var(--border);
   background: none;
@@ -2370,24 +2437,55 @@ textarea.text-input {
   justify-content: center;
 }
 
-.note-check svg { width: 20px; height: 20px; }
-.note-row--done .note-check { border-color: var(--accent); }
-.note-row--done .note-text { color: var(--text-dim); text-decoration: line-through; }
+.groc-check svg { width: 22px; height: 22px; }
+.groc-row--done .groc-check { border-color: var(--accent); }
+.groc-row--done .groc-name { color: var(--text-dim); text-decoration: line-through; }
+.groc-row--done .groc-qty { color: var(--text-dim); }
 
-.note-text { flex: 1; min-width: 0; font-size: 1.05rem; }
-.note-sub { font-size: 0.82rem; color: var(--text-dim); text-decoration: none; }
+.groc-text { flex: 1; min-width: 0; }
+/* 1.12rem: this is read standing back from the panel with a trolley key in one
+   hand, not at desk distance. */
+.groc-name { font-size: 1.12rem; overflow-wrap: anywhere; }
 
-.note-delete {
+/* The amount, not the name - so it stays readable but never competes with what
+   you're actually scanning for.
+   `nowrap` because a quantity is one atom: "2 lb" broke across the line as "2"
+   then "lb", which reads as a different number entirely. */
+.groc-qty {
+  margin-left: 8px;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.groc-source {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  text-decoration: none;
+}
+
+.groc-delete {
   flex: 0 0 auto;
   min-width: 40px;
   min-height: 40px;
   border: none;
   background: none;
   color: var(--text-dim);
-  font-size: 1.5rem;
+  font-size: 1.4rem;
 }
 
-.note-empty { color: var(--text-dim); padding: 16px 4px; }
+.groc-empty { color: var(--text-dim); padding: 16px 4px; grid-column: 1 / -1; }
+
+#groc-done-block { flex: 0 0 auto; }
+#groc-done-block h3 {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+/* Capped: the trolley is a reassurance, not the subject of the screen. */
+#groc-done { max-height: 22vh; overflow-y: auto; }
 
 /* ---------- recipes ---------- */
 
@@ -2546,6 +2644,92 @@ textarea.text-input {
 .today-weather-temp { font-size: clamp(2rem, 5vh, 3.2rem); font-weight: 600; line-height: 1; }
 .today-weather-label { font-size: 1rem; margin-top: 6px; }
 .today-weather-range, .today-weather-sun { font-size: 0.82rem; color: var(--text-dim); margin-top: 6px; }
+.today-weather-feels { font-size: 0.82rem; color: var(--text-dim); margin-top: 4px; }
+.today-weather-feels:empty, .today-weather-sun:empty { display: none; }
+
+/* ---------- air quality and pollen ---------- */
+
+#today-air {
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#today-air:empty { display: none; }
+
+/* 62px: "POLLEN" is the wider of the two labels and at 52px it sat hard against
+   its own reading with no visible gap. */
+.today-air-row {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.today-air-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.today-air-value { font-size: 0.95rem; font-weight: 500; }
+
+/* The note spans both columns under the value rather than sitting beside it -
+   "Grasses, Ragweed, Chenopods" does not fit on one line in this column. */
+.today-air-note {
+  grid-column: 2;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  line-height: 1.3;
+}
+
+.today-air-note:empty { display: none; }
+
+/* ---------- the next few hours ---------- */
+
+/* Above today's events rather than in the aside: it reads as a timeline, which
+   wants width, and the aside column is the narrow one. Scrolls sideways within
+   itself on a short panel instead of forcing the page to. */
+#today-hours {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+  margin-bottom: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#today-hours:empty { display: none; }
+#today-hours::-webkit-scrollbar { display: none; }
+
+.today-hour {
+  flex: 1 0 auto;
+  min-width: 52px;
+  padding: 8px 4px 6px;
+  border-radius: 10px;
+  background: var(--surface);
+  text-align: center;
+}
+
+/* Solid, not a translucent accent wash. A tint here would composite over
+   whatever it sits on and is exactly the bug that made today's calendar cell
+   read as a brown block - see the note on .day-cell.today. */
+.today-hour--now { box-shadow: inset 0 0 0 2px var(--accent); }
+
+.today-hour-when {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.today-hour-icon svg { width: 26px; height: 26px; color: var(--accent); margin: 3px 0 1px; }
+.today-hour-temp { font-size: 0.95rem; font-weight: 600; }
+.today-hour-rain { font-size: 0.7rem; color: var(--text-dim); min-height: 0.9em; }
 
 /* ---------- up next ---------- */
 
@@ -2612,10 +2796,21 @@ textarea.text-input {
 .today-forecast-temps { font-size: 0.88rem; color: var(--text-dim); }
 .today-forecast-temps strong { color: var(--text); font-weight: 600; }
 
-#today-schedule, #today-notes-block, #today-next-block { min-height: 0; display: flex; flex-direction: column; }
+#today-schedule, #today-groceries-block, #today-next-block { min-height: 0; display: flex; flex-direction: column; }
 #today-view h3 { margin: 0 0 10px; font-size: 0.92rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
 
-#today-events, #today-notes, #today-next {
+/* The heading carries a link through to the full page, so "Groceries" is both a
+   label and a way in. Not uppercased with the rest of the heading - it's an
+   action, and it should not read as part of the title. */
+#today-view h3 .today-more {
+  float: right;
+  color: var(--accent);
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.82rem;
+}
+
+#today-events, #today-groceries, #today-next {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -2624,7 +2819,37 @@ textarea.text-input {
   flex: 1;
 }
 
-#today-secondary { display: grid; grid-template-rows: 1fr; gap: 18px; min-height: 0; }
+/* Two rows again: Coming up and the shopping list. This was 1fr 1fr when the
+   removed Notes feature occupied the second slot, and dropping to a single row
+   is what left the right-hand column looking half-finished. Coming up gets the
+   larger share - a week of events is taller than a shopping list. */
+#today-secondary { display: grid; grid-template-rows: 1.35fr 1fr; gap: 18px; min-height: 0; }
+
+/* ---------- groceries, at a glance ---------- */
+
+/* 96px, not 82: "HOUSEHOLD" is the longest aisle name and at 82px it overlapped
+   its own items with no gap. Sized to the widest label rather than to the average. */
+.today-grocery-aisle {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 7px 10px;
+  margin-bottom: 5px;
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.today-grocery-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.today-grocery-items { font-size: 0.95rem; line-height: 1.35; overflow-wrap: anywhere; }
+.today-grocery-more { font-size: 0.82rem; color: var(--text-dim); padding: 4px 10px; }
 
 /* A row is a time gutter and a body, not three stacked lines. Stacked, each row
    needed ~88px for one event, so nine events filled the whole panel; aligning the

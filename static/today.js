@@ -12,6 +12,14 @@ const forecastBlock = document.getElementById("today-forecast");
 const nextUpBlock = document.getElementById("today-next-up");
 const eventsList = document.getElementById("today-events");
 const nextList = document.getElementById("today-next");
+const hoursStrip = document.getElementById("today-hours");
+const groceriesList = document.getElementById("today-groceries");
+const airBlock = document.getElementById("today-air");
+
+/* How many grocery lines the overview shows before collapsing to "+N more".
+   Sized to the column rather than to the list: this block sits under "Coming up"
+   and gets roughly this many rows before it would start scrolling. */
+const GROCERY_PREVIEW_LIMIT = 18;
 
 function todayIso() {
   const now = new Date();
@@ -64,11 +72,74 @@ function washFor(hex, amount) {
 
 /* ---------- weather ---------- */
 
+/** Clock time from an Open-Meteo stamp. Those carry no offset - timezone=auto
+ *  already localised them - so they must NOT go through `new Date()` on a machine
+ *  in another zone. Read the hour out of the string instead. */
+function hourLabel(stamp) {
+  const hour = Number(String(stamp).slice(11, 13));
+  if (!Number.isFinite(hour)) return "";
+  const suffix = hour < 12 ? "am" : "pm";
+  const twelve = hour % 12 === 0 ? 12 : hour % 12;
+  return `${twelve}${suffix}`;
+}
+
+/** The next ten hours. Same series the weather page uses, and the same anchoring
+ *  rule: from the current hour, not from the start of the array - that array
+ *  begins at local midnight, so slicing from zero shows this morning at teatime.
+ *
+ *  Compared on the whole `YYYY-MM-DDTHH` prefix rather than on the hour number,
+ *  which matters because the series spans a week. Filtering on `hour >= 15` alone
+ *  also matched TOMORROW's 3pm, so at half three the strip ran 3pm…11pm and then
+ *  jumped back to "3pm". The prefix is lexicographically ordered, so a plain string
+ *  comparison is also the chronological one, and the strip crosses midnight into
+ *  12am rather than stopping at the end of the day. */
+function renderHours(hours) {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const nowKey =
+    `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` +
+    `T${pad(now.getHours())}`;
+  const upcoming = (hours || [])
+    .filter((hour) => String(hour.time).slice(0, 13) >= nowKey)
+    .slice(0, 10);
+
+  hoursStrip.innerHTML = upcoming.length
+    ? upcoming
+        .map(
+          (hour, index) => `
+        <div class="today-hour${index === 0 ? " today-hour--now" : ""}">
+          <div class="today-hour-when">${index === 0 ? "Now" : escapeText(hourLabel(hour.time))}</div>
+          <div class="today-hour-icon">${weatherIcon(hour.icon)}</div>
+          <div class="today-hour-temp">${hour.temperature}°</div>
+          <div class="today-hour-rain">${
+            hour.precip_chance >= 20 ? `${hour.precip_chance}%` : ""
+          }</div>
+        </div>`
+        )
+        .join("")
+    : "";
+}
+
+/** Sunrise, sunset and how long the day is. */
+function sunLine(data, today) {
+  const clock = (iso) =>
+    new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const parts = [];
+  if (data.sunrise) parts.push(`↑ ${clock(data.sunrise)}`);
+  if (data.sunset) parts.push(`↓ ${clock(data.sunset)}`);
+  if (today && today.daylight_minutes) {
+    const minutes = today.daylight_minutes;
+    parts.push(`${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m of light`);
+  }
+  return parts.join(" · ");
+}
+
 // weather.js already polls and publishes; subscribing avoids a second request.
 onWeather((data) => {
   if (!data || data.available === false) {
     weatherBlock.innerHTML = '<p class="today-empty">Weather unavailable</p>';
     forecastBlock.innerHTML = "";
+    hoursStrip.innerHTML = "";
     return;
   }
   const today = data.days && data.days[0];
@@ -78,10 +149,13 @@ onWeather((data) => {
     <div class="today-weather-label">${escapeText(data.label)}</div>
     ${today ? `<div class="today-weather-range">High ${today.high}° · low ${today.low}°${
       today.precip_chance ? ` · ${today.precip_chance}% rain` : ""}</div>` : ""}
-    <div class="today-weather-sun">${
-      data.sunset
-        ? "Sunset " + new Date(data.sunset).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-        : ""}</div>`;
+    <div class="today-weather-feels">${
+      data.feels_like != null && data.feels_like !== data.temperature
+        ? `Feels like ${data.feels_like}°`
+        : ""}</div>
+    <div class="today-weather-sun">${escapeText(sunLine(data, today))}</div>`;
+
+  renderHours(data.hours);
 
   // The next few days. Same data the weather panel already fetched, so this
   // costs nothing but the markup.
@@ -235,9 +309,118 @@ async function loadUpcoming() {
   }
 }
 
+/** Air quality and pollen.
+ *
+ * Its own fetch rather than a shell subscription, because unlike weather there is
+ * no publisher to subscribe to - /weather is the only other page that reads this.
+ * The two halves fail independently by design (pollen comes from an undocumented
+ * endpoint that will break one day), so each is rendered only if it answered.
+ */
+async function loadAir() {
+  try {
+    const resp = await fetch("/api/weather/air");
+    const data = await resp.json();
+    const rows = [];
+
+    if (data.aqi && data.aqi.available) {
+      rows.push({
+        label: "Air",
+        value: `${data.aqi.aqi} · ${data.aqi.label}`,
+        note: data.aqi.note || "",
+      });
+    }
+    if (data.pollen && data.pollen.available && data.pollen.today) {
+      const today = data.pollen.today;
+      rows.push({
+        label: "Pollen",
+        // The scale is part of the reading: pollen.com's index runs 0-12 and
+        // Google's 0-5, so a bare "7.6" means opposite things depending on which
+        // answered. /weather makes the same point at more length.
+        value: `${today.index} of ${data.pollen.scale_max} · ${today.label}`,
+        note: (today.triggers || []).slice(0, 3).join(", "),
+      });
+    }
+
+    airBlock.innerHTML = rows.length
+      ? rows
+          .map(
+            (row) => `
+        <div class="today-air-row">
+          <span class="today-air-label">${escapeText(row.label)}</span>
+          <span class="today-air-value">${escapeText(row.value)}</span>
+          <span class="today-air-note">${escapeText(row.note)}</span>
+        </div>`
+          )
+          .join("")
+      : "";
+  } catch (e) {
+    // Decoration. A failure here leaves the block empty and collapsed rather than
+    // putting an error on a morning screen.
+    airBlock.innerHTML = "";
+  }
+}
+
+/** What's on the shopping list, grouped by aisle.
+ *
+ * A glance, not a tool: no checkboxes here. Ticking things off wants the tap
+ * targets on /groceries, and a mis-tap from across the kitchen that silently
+ * removes something from the list is worse than walking over.
+ */
+async function loadGroceries() {
+  try {
+    const resp = await fetch("/api/groceries");
+    const data = await resp.json();
+    groceriesList.innerHTML = "";
+
+    if (data.available === false) {
+      const li = document.createElement("li");
+      li.className = "today-empty";
+      // Not "broken": the usual reason is that the wall has no credential for the
+      // list yet, and the list is still fine on everyone's phone.
+      li.innerHTML = `${escapeText(data.errors[0] || "Grocery list unavailable")}`;
+      groceriesList.appendChild(li);
+      return;
+    }
+
+    if (!data.open_count) {
+      empty(groceriesList, data.done_count ? "All picked up." : "Nothing to buy.");
+      return;
+    }
+
+    // Aisle by aisle, in the same store order as the page, capped so a big shop
+    // doesn't push "Coming up" off the screen.
+    let shown = 0;
+    for (const group of data.groups) {
+      if (shown >= GROCERY_PREVIEW_LIMIT) break;
+      const li = document.createElement("li");
+      li.className = "today-grocery-aisle";
+      const names = group.items
+        .slice(0, GROCERY_PREVIEW_LIMIT - shown)
+        .map((item) => item.display);
+      shown += names.length;
+      li.innerHTML = `<span class="today-grocery-label">${escapeText(group.label)}</span>
+        <span class="today-grocery-items">${escapeText(names.join(", "))}</span>`;
+      groceriesList.appendChild(li);
+    }
+
+    const remaining = data.open_count - shown;
+    if (remaining > 0) {
+      const li = document.createElement("li");
+      li.className = "today-grocery-more";
+      li.textContent = `+ ${remaining} more`;
+      groceriesList.appendChild(li);
+    }
+  } catch (e) {
+    groceriesList.innerHTML = "";
+    empty(groceriesList, "Couldn't load the grocery list.");
+  }
+}
+
 function refreshAll() {
   loadToday();
   loadUpcoming();
+  loadGroceries();
+  loadAir();
 }
 
 refreshAll();

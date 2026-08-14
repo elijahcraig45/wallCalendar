@@ -86,19 +86,66 @@ Pollen is billed under Google Maps Platform rather than being free. At one reque
 per 30 minutes this is roughly 1,500 calls a month; check the current free tier and
 set a budget alert rather than taking that as a promise.
 
-### Notes — removed for now
+### Groceries
 
-Notes was built on **Google Tasks** and then taken back out: it wasn't good enough
-to keep on the wall. The work is in git rather than deleted - bring it back with
-`git revert <the removal commit>`, or cherry-pick the pieces.
+The household shopping list, read and written straight out of Daisy's Kitchen -
+`groceryLists/{householdId}/items` on the `recipe-f644f` Firestore. A tick on the
+wall shows up on the phone in the shop and vice versa, because it is the same list
+and not a copy. `/groceries` groups it by aisle; `/today` carries a read-only
+summary of it.
+
+**This needs a credential, unlike Recipes.** Recipes are `allow read: if true`, so
+that page is a keyless GET. Grocery lists are not - their rule is
+`signedIn() && sharesHousehold(...)` - so an unauthenticated request is refused.
+The wall therefore uses a **service account** on the recipes project, whose token
+is admin access; Firestore rules don't apply to it, which is why no Firebase Auth
+user, `users/` document or household membership has to be created for the wall.
+
+One time, as `elijahcraig45@gmail.com`:
+
+```bash
+gcloud iam service-accounts create wall-calendar \
+    --project recipe-f644f --display-name "Wall calendar"
+gcloud projects add-iam-policy-binding recipe-f644f \
+    --member serviceAccount:wall-calendar@recipe-f644f.iam.gserviceaccount.com \
+    --role roles/datastore.user
+gcloud iam service-accounts keys create secrets/recipes_service_account.json \
+    --iam-account wall-calendar@recipe-f644f.iam.gserviceaccount.com \
+    --project recipe-f644f
+```
+
+Then back the key up to the private `wallCalendar-secrets` repo. Override the path
+with `WALLCAL_GROCERY_SA_FILE` if you keep it elsewhere.
+
+Until that key exists the page renders an explained "not set up" state and says the
+list is still on your phone - it is not an error, and nothing else on the wall is
+affected. Which household's list to show is discovered automatically when the
+project has exactly one; set `WALLCAL_HOUSEHOLD_ID` if there is more than one.
+
+Two things worth not rediscovering:
+
+- **Reads need no ingredient parsing.** Every item carries a stored `aisle` and a
+  pre-rendered `quantityLabel`, put there by the app specifically so other clients
+  can display the list without porting its Dart parser.
+- **Adding an item by hand does.** The canonical name is the key the app merges on,
+  so a Python answer that disagreed with Dart's would add a second "tomato" row
+  instead of merging into the existing one. `app/groceries_service.py` ports
+  `canonicalName`/`aisleFor` deliberately, and `tests/api_checks.py` reads the Dart
+  source and fails if the two tables drift apart (skipped when the recipes repo
+  isn't checked out beside this one).
+
+### Notes — removed, and not coming back
+
+Notes was built on **Google Tasks**, taken back out because the wall-side experience
+wasn't good enough, and is now superseded by Groceries above - which is what it was
+mostly being used for. The work is still in git if any of it is wanted.
 
 Worth recording so it isn't rediscovered: **Google Keep cannot be used.** Its API is
 Workspace-only, needs a service account with domain-wide delegation, and is
-unavailable to personal accounts. Tasks was the consumer-account substitute, and it
-does put notes on your phone in the Tasks app and inside Google Calendar - the
-mechanism was fine, the wall-side experience wasn't. Reinstating it needs the
-`auth/tasks` scope back in `GOOGLE_SCOPES` plus a one-time `python cli.py google`
-re-consent.
+unavailable to personal accounts. Tasks was the consumer-account substitute.
+Reinstating it would need the `auth/tasks` scope back in `GOOGLE_SCOPES` plus a
+one-time `python cli.py google` re-consent, since Google doesn't grant scopes
+retroactively.
 
 ### Recipes
 
