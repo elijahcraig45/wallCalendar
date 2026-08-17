@@ -367,6 +367,12 @@ async function loadAir() {
  * removes something from the list is worse than walking over.
  */
 async function loadGroceries() {
+  // Absent when Groceries is switched off on the System page: today.html leaves
+  // the whole block out. Returning here rather than letting the null reach
+  // .innerHTML matters because this runs in the same refresh as the events and
+  // weather blocks, and a TypeError would take those down with it.
+  if (!groceriesList) return;
+
   try {
     const resp = await fetch("/api/groceries");
     const data = await resp.json();

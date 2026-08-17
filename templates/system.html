@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+
+{% block topbar %}
+<h1>System</h1>
+{% endblock %}
+
+{% block content %}
+{# Settings that would normally live in a desktop's tray. The wall autostarts
+   into the kiosk with no desktop behind it, so without this page pairing a
+   speaker or straightening out the touchscreen needs an SSH session. #}
+<div id="system-view">
+
+  <section class="system-card">
+    <h2>Bluetooth</h2>
+    <div id="bt-adapter" class="system-row">
+      <div class="row-title">
+        <span id="bt-adapter-name">Looking for an adapter…</span>
+        <span class="row-subtext" id="bt-adapter-sub"></span>
+      </div>
+      <button id="bt-power" class="pill-button" type="button">Turn on</button>
+      <button id="bt-scan" class="pill-button pill-button--accent" type="button">Scan</button>
+    </div>
+    {# On by default. BlueZ does not do this itself: trusting a device only makes the
+       wall accept an incoming connection, and its [Policy] reconnect plugin only
+       retries after an unexpected disconnect - neither covers "the speaker was off
+       and now it's on". See bluetooth_service's auto-reconnect section. #}
+    <label class="system-toggle" for="bt-autoconnect">
+      <input type="checkbox" id="bt-autoconnect">
+      <span>
+        Reconnect paired devices automatically
+        <span class="row-subtext">Checks every minute. Tapping Disconnect is respected until you connect again.</span>
+      </span>
+    </label>
+
+    {# Off unless someone deliberately turns it on: pairing a speaker only needs
+       the wall to scan, so being discoverable is exposure with no upside. It
+       times itself back off - see bluetooth_service.set_discoverable. #}
+    <label class="system-toggle" for="bt-discoverable">
+      <input type="checkbox" id="bt-discoverable">
+      <span>
+        Let other devices find this wall
+        <span class="row-subtext">Only needed to pair <em>from</em> a phone. Turns itself off.</span>
+      </span>
+    </label>
+    <ul id="bt-devices" class="row-list"></ul>
+    <p id="bt-hint" class="field-hint"></p>
+  </section>
+
+  <section class="system-card">
+    <h2>Touchscreen</h2>
+    <div class="system-row">
+      <div class="row-title">
+        <span id="touch-status">Checking…</span>
+        <span class="row-subtext" id="touch-device"></span>
+      </div>
+      <button id="touch-reset" class="pill-button" type="button">Reset</button>
+      <button id="touch-start" class="pill-button pill-button--accent" type="button">Calibrate</button>
+    </div>
+    <p class="field-hint">
+      Calibration is on trial for 45 seconds and undoes itself unless you keep it, so
+      a bad result cannot lock you out of the screen.
+    </p>
+  </section>
+
+  <section class="system-card">
+    <h2>On-screen keyboard</h2>
+    <div class="system-row">
+      <div class="row-title">
+        <span>Show the keyboard now</span>
+        {# The keyboard appears by itself when a text field is focused. This is for
+           the one case that cannot work: a text box inside a page embedded on the
+           Web tab, where this page cannot see focus across origins. #}
+        <span class="row-subtext">Needed for text boxes inside pages on the Web tab.</span>
+      </div>
+      <button id="kb-toggle" class="pill-button" type="button">Show keyboard</button>
+    </div>
+  </section>
+
+  <section class="system-card">
+    <h2>Sections</h2>
+    <p class="field-hint">
+      Switched-off sections lose their icon in the rail. The pages themselves keep
+      working, so nothing is deleted and turning one back on takes effect at once.
+    </p>
+    <ul id="section-list" class="row-list"></ul>
+  </section>
+</div>
+
+{# Full-screen because calibration has to sample the whole panel, including the
+   corners the rail and the top bar normally occupy. #}
+<div id="calibrate-overlay" class="hidden">
+  <div id="calibrate-instructions">
+    <h2 id="calibrate-title">Tap the centre of each target</h2>
+    <p id="calibrate-progress"></p>
+    <button id="calibrate-cancel" class="pill-button" type="button">Cancel</button>
+  </div>
+  <button id="calibrate-target" type="button" aria-label="Calibration target">
+    <svg viewBox="0 0 48 48" aria-hidden="true">
+      <circle cx="24" cy="24" r="21" fill="none" stroke="currentColor" stroke-width="2"/>
+      <circle cx="24" cy="24" r="3" fill="currentColor"/>
+      <path d="M24 0v14M24 34v14M0 24h14M34 24h14" stroke="currentColor" stroke-width="2"/>
+    </svg>
+  </button>
+  <div id="calibrate-confirm" class="hidden">
+    <h2>Does touch feel right?</h2>
+    <p id="calibrate-countdown"></p>
+    <div id="calibrate-confirm-actions">
+      <button id="calibrate-keep" class="pill-button pill-button--accent" type="button">Keep it</button>
+      <button id="calibrate-undo" class="pill-button" type="button">Undo now</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/system.js?v={{ build }}"></script>
+{% endblock %}

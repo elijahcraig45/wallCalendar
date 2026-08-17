@@ -185,6 +185,18 @@ if (typeof onWeather === "function") {
 applyDim();
 setInterval(applyDim, 60 * 1000);
 
+/* Note on getting a minimised window back: it is NOT done from here.
+
+   The wall is no longer a fullscreen kiosk window (it can't be, or the on-screen
+   keyboard is drawn behind it - see deploy/kiosk-launch.sh), so Chromium draws a
+   title strip with a minimise button, and a stray tap there would leave a blank
+   wall. The obvious fix is a visibilitychange listener here that asks the server to
+   raise the window.
+
+   It was tried and it does not work: measured on the wall, Chromium does not mark
+   the document hidden when labwc minimises it, so the listener never fires. The
+   recovery is a watchdog in kiosk-launch.sh instead. Don't re-add it here. */
+
 /* ---------- idle reset ----------
    A wall display someone left on next December should not still be showing
    next December an hour later. Pages register what "at rest" means for them

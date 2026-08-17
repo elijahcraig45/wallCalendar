@@ -8,3 +8,19 @@ node_modules/
 test-results/
 playwright-report/
 data/weather_cache.json
+data/air_cache.json
+data/alerts_cache.json
+
+# Per-device runtime state, not configuration - the same reason
+# data/account_labels.json is ignored above.
+#
+# This was tracked, and that was actively dangerous once the System page started
+# storing the touchscreen calibration in it: a deploy would check out the
+# developer's copy over the wall's, wiping a calibration someone had just done by
+# tapping five crosshairs. Nothing else in the file belongs to the repo either -
+# which calendars are hidden and which rail sections are switched off are decisions
+# made on the wall, per wall.
+#
+# load_prefs() returns sane defaults when the file is absent, so a fresh clone
+# needs nothing here.
+data/calendar_prefs.json

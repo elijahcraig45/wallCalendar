@@ -18,9 +18,139 @@ two taps and hid where you could go.
 | **Music** | Spotify (see Music, below) |
 | **Web** | A framed browser that cannot strand the wall |
 | **Accounts** | Google sign-in and per-account health |
+| **System** | Bluetooth pairing, touchscreen calibration, the on-screen keyboard, and which sections appear in the rail |
 
 Shell furniture on every page: a clock, a weather chip, a kitchen-timer chip, and
 a now-playing chip.
+
+### System
+
+The wall autostarts into the kiosk browser with no desktop behind it, so anything
+that would normally live in a settings applet is unreachable without SSH. That is
+what this page is for.
+
+**Bluetooth.** Scan, pair, connect, disconnect, forget. Pairing also trusts and
+connects in one go, because an untrusted device makes BlueZ ask for authorisation
+on every reconnect and there is nobody standing there to answer — the speaker just
+silently stops coming back after a power cycle.
+
+`app/bluetooth_service.py` shells out to `bluetoothctl` rather than talking to
+`org.bluez` over D-Bus. Pairing needs a registered *agent*, and `bluetoothctl`
+already is one; doing it in-process would mean a D-Bus mainloop in a thread beside
+Flask, and the venv has no `dbus` module anyway. The trade is that only devices
+which pair without a passkey (speakers, headphones, most trackpads) work — a
+device wanting a typed PIN needs an interactive agent this deliberately isn't.
+
+Devices that never broadcast a name are filtered out of the list unless already
+set up here; a scan in a house otherwise returns thirty phones showing as bare
+MACs. BlueZ also *forgets* unpaired devices once discovery stops, so an empty list
+right after a scan window closes is normal, not a fault.
+
+**Auto-reconnect** (on by default) is the wall reaching out once a minute to
+trusted devices that aren't connected. BlueZ does not cover this case: trusting a
+device only makes the wall *accept* an incoming connection, and its `[Policy]`
+reconnect plugin only retries after an *unexpected* disconnect of an
+already-connected device. Neither covers what actually happens in a kitchen — the
+speaker was off, and now it's on — and plenty of speakers just sit and wait rather
+than initiating. Two behaviours worth knowing:
+
+- Tapping **Disconnect** is remembered, so the loop doesn't undo it a minute later.
+  Connecting or pairing again clears that.
+- A device that is simply switched off backs off exponentially (1, 2, 4, 8 cycles)
+  rather than being paged every minute forever. A success resets it.
+
+**`paired` is not a reliable flag, and the code deliberately doesn't trust it.**
+Measured on this wall's own speaker: it pairs without bonding (`Bonded: no`), so
+BlueZ reports `Paired: no` for exactly as long as it is disconnected — which is
+precisely when a reconnect is wanted. Worse, `bluetoothctl devices Paired` listed
+*nothing* while `info` on the same device said `Paired: yes`; that filter appears
+to track bonding. So the flags come from `bluetoothctl info` per device (only for
+devices already associated with the wall, to keep the subprocess count down), and
+both the UI and the reconnect loop key off **trusted**, which is what persists and
+is what `pair()` sets.
+
+"Let other devices find this wall" is off by default and times itself back off.
+Pairing a speaker only needs the wall to scan, so being discoverable is exposure
+with no upside.
+
+**Touchscreen calibration.** Five crosshairs; tap the centre of each. The fit is a
+least-squares affine solve (`app/system_service.py`), written into
+`~/.config/labwc/rc.xml` as a libinput `<calibrationMatrix>` and applied by sending
+labwc a SIGHUP.
+
+Two things about it are load-bearing:
+
+- It **composes** with the matrix already in force rather than replacing it. The
+  taps were collected *through* the existing matrix, so treating the fit as
+  absolute would apply the old correction twice and each pass would overshoot
+  further instead of converging. Re-calibrating an already-good panel is a no-op,
+  and `tests/api_checks.py` pins that.
+- A new matrix is **on trial for 45 seconds** and undoes itself unless you tap
+  "Keep it". A bad matrix makes the panel unusable, and the only other way back is
+  SSH — so the revert has to happen without anyone being able to tap anything.
+  Obvious nonsense (a big stretch, skew, or off-screen shift) is rejected outright
+  rather than costing you the 45 seconds.
+
+`~/.config/labwc/rc.xml` is **generated** from `deploy/labwc-rc.xml.template` —
+hand edits are lost on the next calibration. Two traps if you edit the template:
+XML comments cannot contain a doubled hyphen (so Chromium switches are written
+there without their dashes), and `str.format` substitutes placeholders inside
+comments too.
+
+**On-screen keyboard.** The keyboard appears by itself whenever a text field takes
+focus; the button here is for the one case that cannot work — a text box inside a
+page embedded on the Web tab, where this page cannot see focus across origins. See
+"Typing on the wall" below for why any of this needed fixing.
+
+**Sections.** Switching a section off removes its rail icon and, for Groceries, its
+block on the Today page. The route and the API keep serving, so nothing is deleted
+and turning it back on is immediate. Calendar is not in the list — it is the reason
+the thing is on the wall.
+
+### Typing on the wall
+
+The on-screen keyboard was invisible for weeks, and the cause was not the keyboard.
+
+labwc stacks a **fullscreen** window above the `wlr-layer-shell` "top" layer, and
+"top" is the layer squeekboard uses. Under Chromium `--kiosk` (which implies
+fullscreen) squeekboard was mapping its 1920x360 surface, loading its layout, and
+reporting `Visible=true` over D-Bus the whole time — behind the page. Two earlier
+rounds added the correct Chromium flags (`--enable-wayland-ime`,
+`--wayland-text-input-version=3`) and concluded they didn't work. They did.
+
+So `deploy/kiosk-launch.sh` now launches `--app=<url> --start-maximized` instead of
+`--kiosk`. **Maximized, not a fixed 1920x1080**: squeekboard sets an exclusive zone,
+so labwc shrinks a maximized window when the keyboard opens and the page reflows
+above it rather than being covered.
+
+Diagnosing this class of problem quickly:
+
+```bash
+# What squeekboard *thinks*. "true" with nothing on screen means a stacking
+# problem, not a text-input problem.
+busctl --user get-property sm.puri.OSK0 /sm/puri/OSK0 sm.puri.OSK0 Visible
+
+# The discriminator: overlay draws above a fullscreen window, top does not.
+labnag --message top --layer top --timeout 0
+labnag --message overlay --layer overlay --timeout 0
+```
+
+The cost, and the dead ends, so they are not re-tried:
+
+- `--app` mode makes Chromium draw its own 26px title strip, with minimise and
+  close buttons. It is *client-side*: labwc `serverDecoration="no"`,
+  `SetDecorations decorations="none"`, and a negative `<margin top="-26">` were all
+  tried and none remove it. `ResizeTo`/`MoveTo` to a negative y is clamped.
+- A tap on that **minimise** button would leave a blank wall that touching cannot
+  recover — the browser is still running, so `kiosk-launch.sh`'s supervisor sees
+  nothing wrong. `static/nav.js` watches for the document going hidden and asks the
+  server to raise the window back. It has to come from the page because
+  `wlrctl toplevel find state:minimized` does not work (always exits 1).
+- `wf-panel-pi` is killed at launch, along with its `lwrespawn` supervisor. Its
+  exclusive zone shrinks a *maximized* window; fullscreen used to just cover it.
+- Chromium's Wayland `app_id` differs by mode — `chromium` under `--kiosk`,
+  `chrome-127.0.0.1__-Default` under `--app`. A `chrome-*` window rule silently
+  matches nothing in kiosk mode.
 
 ### Weather
 

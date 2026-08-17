@@ -42,11 +42,17 @@
     </div>
     {# The household list out of Daisy's Kitchen. Read-only here on purpose: this
        is the glance surface, and ticking things off belongs on /groceries where
-       the tap targets are sized for it. #}
+       the tap targets are sized for it.
+
+       Dropped entirely when Groceries is switched off on the System page, rather
+       than left as an empty heading. today.js guards on the list element being
+       absent - see loadGroceries(). #}
+    {% if "groceries" not in hidden %}
     <div id="today-groceries-block">
       <h3>Groceries <a href="/groceries" class="today-more">Open</a></h3>
       <ul id="today-groceries"></ul>
     </div>
+    {% endif %}
   </section>
 </div>
 {% endblock %}

@@ -885,6 +885,464 @@ def check_demo_groceries_writes_are_stateful():
           demo_groceries.get_groceries()["done_count"] == 0, f"cleared {cleared}")
 
 
+def check_timed_events_send_rfc3339():
+    """Google rejected every *timed* event with a bare 400 "Bad Request" because
+    the dateTime came straight from an <input type="datetime-local">, whose value
+    has no seconds field - and RFC3339 makes seconds mandatory. All-day events use
+    the date field and were fine, which is why this read as intermittent.
+
+    Verified against the real API at the time: "2026-12-30T09:00" is refused and
+    "2026-12-30T09:00:00" is accepted, with everything else in the body identical.
+    """
+    print("timed events are sent as RFC3339")
+    from app.calendar_service import _rfc3339_local
+
+    check(
+        "datetime-local minutes gain a seconds field",
+        _rfc3339_local("2026-12-30T09:00") == "2026-12-30T09:00:00",
+        _rfc3339_local("2026-12-30T09:00"),
+    )
+    check(
+        "a value that already has seconds is unchanged",
+        _rfc3339_local("2026-12-30T09:00:30") == "2026-12-30T09:00:30",
+    )
+    # No offset: it rides alongside an explicit timeZone, and adding one here
+    # would pin the event to whatever zone the *server* thinks it is in.
+    check(
+        "no UTC offset is invented",
+        "+" not in _rfc3339_local("2026-12-30T09:00")
+        and not _rfc3339_local("2026-12-30T09:00").endswith("Z"),
+    )
+
+
+def check_prefs_setters_do_not_clobber_each_other():
+    """set_calendar_excluded() used to call save_prefs() with a freshly built
+    one-key dict, replacing the whole file. That was harmless while calendar
+    exclusions were the only setting in it, and silently destructive the moment
+    the System page started storing hidden sections in the same file: hiding
+    Groceries, then unticking any calendar, brought Groceries back."""
+    print("prefs setters merge rather than replace")
+    import json
+    import tempfile
+    from unittest.mock import patch
+
+    from app import preferences
+
+    with tempfile.TemporaryDirectory() as tmp:
+        prefs_file = pathlib.Path(tmp) / "calendar_prefs.json"
+        with patch.object(preferences, "PREFS_FILE", prefs_file):
+            preferences.set_section_hidden("groceries", True)
+            preferences.set_calendar_excluded("work@example.com", True)
+
+            stored = json.loads(prefs_file.read_text())
+            check(
+                "a calendar toggle keeps hidden_sections",
+                stored.get("hidden_sections") == ["groceries"],
+                repr(stored),
+            )
+            check(
+                "and the exclusion is stored too",
+                stored.get("excluded_calendar_ids") == ["work@example.com"],
+                repr(stored),
+            )
+
+            # And the other direction.
+            preferences.set_section_hidden("weather", True)
+            stored = json.loads(prefs_file.read_text())
+            check(
+                "hiding a section keeps excluded_calendar_ids",
+                stored.get("excluded_calendar_ids") == ["work@example.com"],
+                repr(stored),
+            )
+            check(
+                "an unknown section is refused rather than stored",
+                _raises(ValueError, preferences.set_section_hidden, "nonsense", True),
+            )
+
+
+def _raises(exc_type, fn, *args):
+    try:
+        fn(*args)
+    except exc_type:
+        return True
+    except Exception:
+        return False
+    return False
+
+
+def check_touch_calibration_maths():
+    """The calibration fit has to invert the panel's error, and - the part that is
+    easy to get wrong - it has to *compose* with the matrix already in force.
+
+    Samples are collected through the existing matrix, so treating the fit as an
+    absolute replacement applies the old correction twice and each pass overshoots
+    further instead of converging. The idempotence check below is what pins that.
+    """
+    print("touch calibration maths")
+    from app import system_service as sysx
+
+    targets = [(0.12, 0.14), (0.88, 0.14), (0.50, 0.50), (0.12, 0.86), (0.88, 0.86)]
+
+    # A panel reading 4% over-scaled in x, 2% under in y, and offset a little.
+    def distort(tx, ty):
+        return (tx * 1.04 + 0.03, ty * 0.98 + 0.02)
+
+    samples = [{"target": [tx, ty], "observed": list(distort(tx, ty))} for tx, ty in targets]
+    matrix = sysx._compose(sysx._solve_affine(samples), sysx.IDENTITY)
+    sysx._sanity_check(matrix)
+
+    a, b, c, d, e, f = matrix
+    worst = max(
+        max(abs(a * ox + b * oy + c - tx), abs(d * ox + e * oy + f - ty))
+        for (tx, ty), s in zip(targets, samples)
+        for ox, oy in [s["observed"]]
+    )
+    check("the fit maps taps back onto their targets", worst < 1e-9, f"worst {worst}")
+
+    already_right = [{"target": [tx, ty], "observed": [tx, ty]} for tx, ty in targets]
+    again = sysx._compose(sysx._solve_affine(already_right), matrix)
+    check(
+        "re-calibrating a good panel is a no-op (composition, not replacement)",
+        all(abs(x - y) < 1e-9 for x, y in zip(matrix, again)),
+        f"{matrix} -> {again}",
+    )
+
+    collinear = [{"target": [v, v], "observed": [v, v]} for v in (0.1, 0.5, 0.9)]
+    check(
+        "collinear taps are refused, not flattened onto one axis",
+        _raises(sysx.SystemActionFailed, sysx._solve_affine, collinear),
+    )
+    check(
+        "fewer than three points is refused",
+        _raises(sysx.SystemActionFailed, sysx._solve_affine, collinear[:2]),
+    )
+    # The auto-revert is the real safety net, but rejecting obvious nonsense saves
+    # whoever is standing there 45 seconds of an unusable touchscreen.
+    for label, bad in [
+        ("a 3x stretch", (3.0, 0.0, 0.0, 0.0, 1.0, 0.0)),
+        ("an off-screen shift", (1.0, 0.0, 0.9, 0.0, 1.0, 0.0)),
+        ("a heavy skew", (1.0, 0.8, 0.0, 0.0, 1.0, 0.0)),
+    ]:
+        check(
+            f"{label} is rejected",
+            _raises(sysx.SystemActionFailed, sysx._sanity_check, bad),
+        )
+
+
+def check_rc_xml_render_is_well_formed():
+    """~/.config/labwc/rc.xml is generated, and a malformed one costs the
+    touchscreen its output mapping. Two traps, both hit for real while building
+    this: XML comments cannot contain a doubled hyphen (the template quotes
+    Chromium switches), and str.format substitutes placeholders *inside* comments,
+    which pasted a calibration matrix into the middle of the header block."""
+    print("labwc rc.xml renders well-formed")
+    import xml.etree.ElementTree as ET
+
+    from app import system_service as sysx
+
+    NS = {"o": "http://openbox.org/3.4/rc"}
+    device = "Weida Hi-Tech                CoolTouchR System            (USB 3-1.3)"
+
+    calibrated = sysx.render_rc_xml((0.98, 0.0, 0.01, 0.0, 1.01, -0.005), device, "HDMI-A-1")
+    root = ET.fromstring(calibrated)
+    found = root.findall(".//o:calibrationMatrix", NS)
+    check("exactly one calibrationMatrix element", len(found) == 1, f"{len(found)} found")
+
+    touch = root.find(".//o:touch", NS)
+    # The interior whitespace in the device name is significant - labwc matches it
+    # literally, and a normalised space silently stops the mapping applying.
+    check(
+        "the device name survives verbatim, whitespace and all",
+        touch is not None and touch.get("deviceName") == device,
+        repr(touch.get("deviceName")) if touch is not None else "no <touch>",
+    )
+
+    uncalibrated = ET.fromstring(sysx.render_rc_xml(None, device, "HDMI-A-1"))
+    check(
+        "an uncalibrated wall gets no matrix at all",
+        not uncalibrated.findall(".//o:calibrationMatrix", NS),
+    )
+    check(
+        "identity is written as no matrix rather than as 1 0 0 0 1 0",
+        not ET.fromstring(
+            sysx.render_rc_xml(sysx.IDENTITY, device, "HDMI-A-1")
+        ).findall(".//o:calibrationMatrix", NS),
+    )
+
+    rule = ET.fromstring(calibrated).find(".//o:windowRule", NS)
+    # Chromium's app_id is "chrome-127.0.0.1__-Default" in --app mode and plain
+    # "chromium" under --kiosk; a chrome-* rule matching nothing was a real dead end.
+    check(
+        "the kiosk window rule targets Chromium's app-mode app_id",
+        rule is not None and rule.get("identifier") == "chrome-*",
+        rule.get("identifier") if rule is not None else "no rule",
+    )
+
+
+def check_bluetooth_success_strings():
+    """bluetoothctl exits 0 whether an action worked or not, so success is decided
+    by matching its prose - and it uses different words per verb.
+
+    "remove" is the trap: it answers "Device has been removed", which contains
+    neither "successful" nor "succeeded". A shared check on those two made every
+    successful Forget report a failure while the device disappeared anyway. Strings
+    below are transcribed from BlueZ 5.82 on the wall, not guessed.
+    """
+    print("bluetooth success strings")
+    from unittest.mock import patch
+
+    from app import bluetooth_service as bt
+
+    real_replies = {
+        "pair": "Attempting to pair with 00:11:22:33:44:55\nPairing successful",
+        "connect": "Attempting to connect to 00:11:22:33:44:55\nConnection successful",
+        "disconnect": "Attempting to disconnect\nSuccessful disconnected",
+        "trust": "Changing 00:11:22:33:44:55 trust succeeded",
+        "remove": "[DEL] Device 00:11:22:33:44:55 Speaker\nDevice has been removed",
+    }
+    for verb, reply in real_replies.items():
+        with patch.object(bt, "_run", return_value=reply):
+            result = bt._action(verb, "00:11:22:33:44:55")
+        check(f"{verb} is read as success", result["ok"], repr(result))
+
+    # The failure shape is the same one line for every verb.
+    with patch.object(bt, "_run", return_value="Device 00:11:22:33:44:55 not available"):
+        for verb in real_replies:
+            result = bt._action(verb, "00:11:22:33:44:55")
+            check(
+                f"{verb} failure is reported, with the reason",
+                not result["ok"] and "not available" in result["error"],
+                repr(result),
+            )
+
+
+def check_bluetooth_autoconnect():
+    """BlueZ won't reconnect a speaker that was switched off and back on - trusting
+    only makes the wall *accept* a connection, and the [Policy] plugin only retries
+    after an unexpected disconnect. So the wall reaches out on a timer.
+
+    The two behaviours worth pinning are the ones that would be annoying rather than
+    merely broken: a deliberate Disconnect must not be undone a minute later, and a
+    speaker that is simply off must not be paged once a minute forever.
+    """
+    print("bluetooth auto-reconnect")
+    import tempfile
+    from unittest.mock import patch
+
+    from app import bluetooth_service as bt
+    from app import preferences
+
+    # paired=False on purpose: this is the real shape of a disconnected speaker that
+    # pairs without bonding, which is what broke the first version of the loop.
+    paired_off = {
+        "address": "AA:BB:CC:DD:EE:FF",
+        "name": "Speaker",
+        "known": True,
+        "paired": False,
+        "bonded": False,
+        "trusted": True,
+        "connected": False,
+    }
+
+    def run_pass(connect_ok, extra_devices=()):
+        calls = []
+
+        def fake_action(verb, mac, timeout=30):
+            calls.append((verb, mac))
+            return {"ok": connect_ok} if connect_ok else {"ok": False, "error": "not available"}
+
+        with (
+            patch.object(bt, "adapter", return_value={"powered": True}),
+            patch.object(bt, "devices", return_value=[paired_off, *extra_devices]),
+            patch.object(bt, "_action", side_effect=fake_action),
+        ):
+            attempted = bt.reconnect_once()
+        return calls, attempted
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with patch.object(preferences, "PREFS_FILE", pathlib.Path(tmp) / "prefs.json"):
+            bt._reconnect_state.clear()
+
+            check("enabled by default", bt.autoconnect_enabled())
+
+            calls, attempted = run_pass(connect_ok=True)
+            check("a trusted, disconnected device is connected even though paired=False", calls == [("connect", paired_off["address"])], repr(calls))
+            check("and the attempt is reported", attempted and attempted[0]["ok"])
+
+            # A device that is off: first pass tries, the next must not.
+            bt._reconnect_state.clear()
+            calls1, _ = run_pass(connect_ok=False)
+            calls2, _ = run_pass(connect_ok=False)
+            check("a failing device is tried once...", len(calls1) == 1, repr(calls1))
+            check("...then backed off rather than paged every cycle", calls2 == [], repr(calls2))
+
+            # A deliberate Disconnect has to stick.
+            bt._reconnect_state.clear()
+            with patch.object(bt, "_action", return_value={"ok": True}):
+                bt.disconnect(paired_off["address"])
+            check(
+                "Disconnect records an opt-out",
+                paired_off["address"] in bt._optouts(),
+                repr(bt._optouts()),
+            )
+            calls3, _ = run_pass(connect_ok=True)
+            check("...and auto-reconnect leaves it alone", calls3 == [], repr(calls3))
+
+            # Connecting by hand clears it again.
+            with patch.object(bt, "_action", return_value={"ok": True}):
+                bt.connect(paired_off["address"])
+            check("Connect clears the opt-out", paired_off["address"] not in bt._optouts())
+            bt._reconnect_state.clear()
+            calls4, _ = run_pass(connect_ok=True)
+            check("...so it is looked after again", len(calls4) == 1, repr(calls4))
+
+            # Unpaired or untrusted devices are never touched: connecting to a
+            # neighbour's phone that happens to be in range would be worse than
+            # doing nothing.
+            bt._reconnect_state.clear()
+            strangers = [
+                {"address": "11:11:11:11:11:11", "name": "Phone", "known": False, "paired": False, "trusted": False, "connected": False},
+                {"address": "22:22:22:22:22:22", "name": "Untrusted", "known": False, "paired": True, "trusted": False, "connected": False},
+                {"address": "33:33:33:33:33:33", "name": "Already on", "known": True, "paired": True, "trusted": True, "connected": True},
+            ]
+            with (
+                patch.object(bt, "adapter", return_value={"powered": True}),
+                patch.object(bt, "devices", return_value=strangers),
+                patch.object(bt, "_action", side_effect=AssertionError("must not connect")),
+            ):
+                check("untrusted and already-connected devices are skipped", bt.reconnect_once() == [])
+
+            # And the whole thing is off when switched off.
+            bt.set_autoconnect(False)
+            bt._reconnect_state.clear()
+            with patch.object(bt, "_action", side_effect=AssertionError("must not connect")):
+                check("switching it off stops all attempts", bt.reconnect_once() == [])
+            bt.set_autoconnect(True)
+
+            # A wall with no adapter must not take the loop down with it.
+            with patch.object(bt, "adapter", side_effect=bt.BluetoothUnavailable("no adapter")):
+                check("no adapter is survivable", bt.reconnect_once() == [])
+
+
+def check_unconfirmed_calibration_cannot_survive_a_restart():
+    """A trial calibration lives in a threading.Timer, so a restart during the 45
+    seconds would take the revert with it and leave an unconfirmed matrix in
+    rc.xml forever - while prefs still said "not calibrated".
+
+    That mismatch is the dangerous part, not the stray file: the next calibration
+    composes against the matrix prefs report, so it would compound the stray one.
+    sync_rc_from_prefs() at startup makes prefs authoritative again.
+    """
+    print("an unconfirmed calibration cannot survive a restart")
+    import tempfile
+    from unittest.mock import patch
+
+    from app import preferences
+    from app import system_service as sysx
+
+    with tempfile.TemporaryDirectory() as tmp:
+        rc_path = pathlib.Path(tmp) / "rc.xml"
+        prefs_file = pathlib.Path(tmp) / "calendar_prefs.json"
+        reloads = []
+
+        with (
+            patch.object(sysx, "RC_PATH", str(rc_path)),
+            patch.object(preferences, "PREFS_FILE", prefs_file),
+            patch.object(sysx, "_run", side_effect=lambda *a, **k: reloads.append(a) or _ok()),
+            patch.object(sysx, "touch_devices", return_value=["Fixture Touchscreen"]),
+            patch.object(sysx, "_outputs", return_value=["HDMI-A-1"]),
+        ):
+            # Simulate the orphan: a matrix on disk, nothing stored in prefs.
+            sysx._write_rc_and_reload((1.0, 0.0, -0.02, 0.0, 1.0, -0.02), "Fixture Touchscreen", "HDMI-A-1")
+            check("the trial matrix is on disk", "calibrationMatrix>1." in rc_path.read_text())
+            check("but prefs do not claim a calibration", not preferences.load_prefs().get("touch_calibration"))
+
+            # ...and now the service starts up again.
+            sysx.sync_rc_from_prefs()
+            body = rc_path.read_text()
+            # The word appears in the template's comment; the element does not.
+            check(
+                "startup removes the orphaned matrix element",
+                "<calibrationMatrix>" not in body,
+                body[body.find("<libinput") : body.find("</libinput>")],
+            )
+
+            # A *confirmed* calibration must survive the same restart.
+            preferences.update_prefs(
+                touch_calibration=[1.0, 0.0, -0.02, 0.0, 1.0, -0.02],
+                touch_device="Fixture Touchscreen",
+                touch_output="HDMI-A-1",
+            )
+            sysx.sync_rc_from_prefs()
+            check(
+                "a confirmed calibration is restored on startup",
+                "<calibrationMatrix>" in rc_path.read_text(),
+            )
+
+
+def _ok():
+    class R:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    return R()
+
+
+def check_hidden_sections_hide_the_rail_not_the_route():
+    """"Disable, don't delete": a switched-off section loses its rail icon while its
+    route keeps serving. The Today page's grocery block also has to disappear, and
+    today.js has to survive the element being absent - it renders events, weather
+    and groceries in one pass, so an unguarded null would take the others down."""
+    print("hidden sections hide the rail, not the route")
+    import json
+    import tempfile
+    from unittest.mock import patch
+
+    from app import preferences
+    import server
+
+    with tempfile.TemporaryDirectory() as tmp:
+        prefs_file = pathlib.Path(tmp) / "calendar_prefs.json"
+        with patch.object(preferences, "PREFS_FILE", prefs_file):
+            client = server.app.test_client()
+
+            shown = client.get("/").get_data(as_text=True)
+            check('the rail links Groceries by default', 'data-nav="/groceries"' in shown)
+
+            preferences.set_section_hidden("groceries", True)
+
+            hidden_home = client.get("/").get_data(as_text=True)
+            check(
+                "hiding it removes the rail link",
+                'data-nav="/groceries"' not in hidden_home,
+            )
+            check(
+                "and leaves the Calendar link, which is not hideable",
+                'data-nav="/"' in hidden_home,
+            )
+            check(
+                "the Today block goes too",
+                "today-groceries" not in client.get("/today").get_data(as_text=True),
+            )
+            # The point of disabling rather than deleting.
+            check("the page still serves", client.get("/groceries").status_code == 200)
+            check("the API still serves", client.get("/api/groceries").status_code == 200)
+
+            reported = json.loads(client.get("/api/system/sections").get_data(as_text=True))
+            check(
+                "the System page reports it as hidden",
+                {s["name"]: s["hidden"] for s in reported["sections"]}["groceries"] is True,
+            )
+
+    # today.js must not assume the element exists.
+    today_js = (pathlib.Path(__file__).parent.parent / "static" / "today.js").read_text()
+    check(
+        "today.js guards on the grocery list being absent",
+        "if (!groceriesList) return;" in today_js,
+    )
+
+
 def main():
     os.environ.setdefault("FLASK_SECRET_KEY", "api-checks")
     for fn in (
@@ -907,6 +1365,14 @@ def main():
         check_grocery_ordering_and_grouping,
         check_grocery_parser_matches_the_dart_original,
         check_demo_groceries_writes_are_stateful,
+        check_timed_events_send_rfc3339,
+        check_prefs_setters_do_not_clobber_each_other,
+        check_touch_calibration_maths,
+        check_rc_xml_render_is_well_formed,
+        check_bluetooth_success_strings,
+        check_bluetooth_autoconnect,
+        check_unconfirmed_calibration_cannot_survive_a_restart,
+        check_hidden_sections_hide_the_rail_not_the_route,
     ):
         fn()
 

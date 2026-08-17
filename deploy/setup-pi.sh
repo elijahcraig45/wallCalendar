@@ -52,6 +52,28 @@ sudo apt-get install -y --no-install-recommends \
   gstreamer1.0-libav gstreamer1.0-plugins-good gstreamer1.0-plugins-bad \
   gstreamer1.0-plugins-ugly gstreamer1.0-alsa
 
+# For the System page.
+#
+#   squeekboard  the on-screen keyboard. Already present on Raspberry Pi OS, but
+#                named explicitly because typing on the wall depends on it, and
+#                because /usr/bin/sbtest only launches it when libinput reports a
+#                touch device - so a missing package looks like "no keyboard"
+#                rather than like a missing package.
+#   wlrctl       used to raise the kiosk window if someone taps the minimise
+#                button on Chromium's title strip. Without it that tap leaves a
+#                blank wall recoverable only over SSH.
+#   bluez        pairing and connecting speakers. bluetoothctl also acts as the
+#                pairing agent, which is why app/bluetooth_service.py shells out
+#                to it instead of talking to org.bluez directly.
+#   libinput-tools  device enumeration for touchscreen calibration.
+#
+# No `usermod -aG bluetooth` here: on this image Debian's D-Bus policy already
+# lets a normal user pair and change adapter settings, verified on BlueZ 5.82. If
+# a future image tightens that, every Bluetooth call fails with NotAuthorized and
+# the fix is to add the group and restart wallcalendar.service.
+sudo apt-get install -y --no-install-recommends \
+  squeekboard wlrctl bluez libinput-tools
+
 # Security updates, applied on their own. This is an always-on, internet-connected
 # device on a home network that nobody logs into for months at a time - exactly the
 # machine that should not be waiting for someone to remember `apt upgrade`.
@@ -214,6 +236,35 @@ sed -e "s#__INSTALL_DIR__#$INSTALL_DIR#g" \
 CLEANUP_ARGS=()
 $AUTO_YES && CLEANUP_ARGS+=(--yes)
 bash "$DEPLOY_DIR/cleanup-autostart.sh" "${CLEANUP_ARGS[@]}"
+
+# labwc config: the touchscreen's output mapping and the kiosk window rule.
+#
+# Rendered from deploy/labwc-rc.xml.template by the same code the System page's
+# calibration uses, so there is one owner of this file and a calibration cannot be
+# undone by setup re-running. Skipped if a calibration is already stored, since
+# re-rendering would be a no-op anyway - and left non-fatal because the wall is
+# perfectly usable without it (all that is lost is a taskbar entry nobody sees).
+log "Installing labwc config (touch mapping + kiosk window rule)"
+if ! (cd "$INSTALL_DIR" && "$INSTALL_DIR/.venv/bin/python" - <<'PYEOF'
+from app import system_service
+
+state = system_service.calibration_state()
+if not state["device"]:
+    print("  no touchscreen detected; writing config without a touch mapping")
+matrix = tuple(state["matrix"]) if state["calibrated"] else None
+try:
+    system_service._write_rc_and_reload(matrix, state["device"] or "", state["output"])
+except system_service.SystemActionFailed as exc:
+    # Expected when setup runs over SSH before the desktop session exists: the
+    # file is written, only the live reload could not happen.
+    raise SystemExit(f"  {exc}")
+print(f"  wrote {system_service.RC_PATH}")
+PYEOF
+); then
+  warn "could not reload ~/.config/labwc/rc.xml now (is a desktop session running?)."
+  warn "The wall still works; the kiosk window will just show up in the taskbar"
+  warn "until the next reboot picks the file up."
+fi
 
 log "Done"
 echo "Backend:      sudo systemctl status wallcalendar.service"

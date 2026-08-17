@@ -1,4 +1,5 @@
 import datetime as dt
+import re
 
 import requests.exceptions
 from flask import Flask, jsonify, redirect, render_template, request, session
@@ -9,6 +10,7 @@ from spotipy.exceptions import SpotifyException
 from app import (
     air_service,
     alerts_service,
+    bluetooth_service,
     browser_service,
     calendar_service,
     demo_data,
@@ -16,6 +18,7 @@ from app import (
     preferences,
     recipes_service,
     spotify_service,
+    system_service,
     version,
     weather_service,
 )
@@ -33,7 +36,14 @@ def inject_globals():
     # having to remember to pass the flag through.
     # `build` cache-busts the asset URLs, so a reload after a deploy is
     # guaranteed to fetch the new CSS rather than revalidate into the old one.
-    return {"demo_mode": DEMO_MODE, "build": version.BUILD}
+    # `hidden` drives the rail: sections switched off on the System page are not
+    # rendered at all, so it has to be available to base.html on every page
+    # rather than passed by the handful of views that happen to mention them.
+    return {
+        "demo_mode": DEMO_MODE,
+        "build": version.BUILD,
+        "hidden": preferences.hidden_sections(),
+    }
 
 
 @app.errorhandler(calendar_service.DemoModeError)
@@ -532,6 +542,151 @@ def api_weather_radar():
     return jsonify(alerts_service.radar_station())
 
 
+# ---------------------------------------------------------------- system settings
+#
+# The wall autostarts into the kiosk with no desktop behind it, so a setting that
+# would normally live in a system tray - pairing a speaker, straightening out the
+# touchscreen - is unreachable here without SSH. That is what /system is for.
+
+
+@app.errorhandler(system_service.SystemActionFailed)
+def handle_system_action_failed(e):
+    return jsonify({"error": str(e)}), 503
+
+
+@app.errorhandler(bluetooth_service.BluetoothUnavailable)
+def handle_bluetooth_unavailable(e):
+    return jsonify({"error": str(e)}), 503
+
+
+@app.route("/system")
+def system_page():
+    return render_template("system.html")
+
+
+@app.route("/api/system/sections")
+def api_system_sections():
+    hidden = preferences.hidden_sections()
+    return jsonify(
+        {
+            "sections": [
+                {"name": name, "hidden": name in hidden}
+                for name in preferences.HIDEABLE_SECTIONS
+            ]
+        }
+    )
+
+
+@app.route("/api/system/sections/<section>", methods=["POST"])
+def api_system_section_set(section):
+    try:
+        hidden = preferences.set_section_hidden(section, bool((request.json or {}).get("hidden")))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "hidden": sorted(hidden)})
+
+
+@app.route("/api/system/bluetooth")
+def api_system_bluetooth():
+    return jsonify(
+        {
+            "adapter": bluetooth_service.adapter(),
+            "devices": bluetooth_service.devices(),
+            "autoconnect": bluetooth_service.autoconnect_enabled(),
+        }
+    )
+
+
+@app.route("/api/system/bluetooth/autoconnect", methods=["POST"])
+def api_system_bluetooth_autoconnect():
+    return jsonify(bluetooth_service.set_autoconnect(bool((request.json or {}).get("on"))))
+
+
+@app.route("/api/system/bluetooth/reconnect", methods=["POST"])
+def api_system_bluetooth_reconnect():
+    # Runs one pass of what the background loop does, so "try now" doesn't mean
+    # waiting up to a minute - and so the behaviour is exercisable without a wait.
+    return jsonify({"ok": True, "attempted": bluetooth_service.reconnect_once()})
+
+
+@app.route("/api/system/bluetooth/scan", methods=["POST"])
+def api_system_bluetooth_scan():
+    # Returns as soon as discovery is running rather than waiting it out - the
+    # page polls the device list. `started` is false when a scan was already going.
+    return jsonify({"ok": True, "started": bluetooth_service.start_scan()})
+
+
+@app.route("/api/system/bluetooth/power", methods=["POST"])
+def api_system_bluetooth_power():
+    return jsonify(bluetooth_service.set_powered(bool((request.json or {}).get("on"))))
+
+
+@app.route("/api/system/bluetooth/discoverable", methods=["POST"])
+def api_system_bluetooth_discoverable():
+    return jsonify(bluetooth_service.set_discoverable(bool((request.json or {}).get("on"))))
+
+
+@app.route("/api/system/bluetooth/<mac>/<action>", methods=["POST"])
+def api_system_bluetooth_device(mac, action):
+    handlers = {
+        "pair": bluetooth_service.pair,
+        "connect": bluetooth_service.connect,
+        "disconnect": bluetooth_service.disconnect,
+        "forget": bluetooth_service.forget,
+    }
+    if action not in handlers:
+        return jsonify({"error": f"Unknown action {action!r}."}), 400
+    # Address comes straight from the scan list, but it reaches a subprocess
+    # argument, so it is validated as an address rather than trusted as one.
+    if not re.fullmatch(r"[0-9A-Fa-f:]{17}", mac):
+        return jsonify({"error": "That is not a Bluetooth address."}), 400
+    result = handlers[action](mac.upper())
+    return jsonify(result), 200 if result.get("ok") else 502
+
+
+@app.route("/api/system/touch")
+def api_system_touch():
+    return jsonify(system_service.calibration_state())
+
+
+@app.route("/api/system/touch/calibrate", methods=["POST"])
+def api_system_touch_calibrate():
+    samples = (request.json or {}).get("samples") or []
+    return jsonify(system_service.apply_calibration(samples))
+
+
+@app.route("/api/system/touch/confirm", methods=["POST"])
+def api_system_touch_confirm():
+    matrix = (request.json or {}).get("matrix") or []
+    if len(matrix) != 6:
+        return jsonify({"error": "A calibration matrix has six values."}), 400
+    return jsonify(system_service.confirm_calibration(matrix))
+
+
+@app.route("/api/system/touch/revert", methods=["POST"])
+def api_system_touch_revert():
+    return jsonify(system_service.revert_calibration())
+
+
+@app.route("/api/system/touch/reset", methods=["POST"])
+def api_system_touch_reset():
+    return jsonify(system_service.reset_calibration())
+
+
+@app.route("/api/system/keyboard", methods=["POST"])
+def api_system_keyboard():
+    data = request.json or {}
+    visible = data.get("visible")
+    if visible is None:
+        visible = not system_service.keyboard_visible()
+    return jsonify(system_service.set_keyboard_visible(bool(visible)))
+
+
+@app.route("/api/system/kiosk/restore", methods=["POST"])
+def api_system_kiosk_restore():
+    return jsonify(system_service.restore_kiosk())
+
+
 @app.route("/api/browser/probe")
 def api_browser_probe():
     try:
@@ -541,6 +696,20 @@ def api_browser_probe():
 
 
 if __name__ == "__main__":
+    # Bring ~/.config/labwc/rc.xml back in line with stored prefs before serving.
+    #
+    # Prefs are the source of truth for the touchscreen calibration; rc.xml is
+    # derived from them. The reason this runs at startup rather than only when
+    # something changes is the 45-second calibration trial: its revert lives in a
+    # threading.Timer, so restarting mid-trial would otherwise leave an
+    # unconfirmed matrix in place forever. See system_service.sync_rc_from_prefs.
+    system_service.sync_rc_from_prefs()
+
+    # Reach out to paired speakers that have been switched back on. BlueZ won't:
+    # trusting a device only makes the wall accept an incoming connection, and its
+    # [Policy] reconnect plugin only retries after an unexpected disconnect.
+    bluetooth_service.start_autoconnect()
+
     # 5000 is the real port everywhere - the kiosk launcher and the Google OAuth
     # redirect URI are both pinned to it. PORT exists so a second instance can be
     # brought up alongside it (the layout tests run a zero-accounts one); anything

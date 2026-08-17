@@ -1,0 +1,74 @@
+<?xml version="1.0"?>
+<!--
+  Generated file. Do not hand edit.
+
+  ~/.config/labwc/rc.xml is written from this template by app/system_service.py,
+  so anything typed in directly is lost the next time the touchscreen is
+  calibrated. Change the template instead, then calibrate (or reset calibration)
+  from the System page to regenerate.
+
+  Two things to know before editing:
+
+  - XML comments cannot contain a doubled hyphen, so Chromium switches are
+    written here without their leading dashes.
+  - render_rc_xml() uses str.format, which substitutes placeholders anywhere in
+    the file including inside comments. Naming them in prose here (rather than
+    writing them in their braced form) is what stops this block from having a
+    calibration matrix pasted into the middle of it - which is exactly what
+    happened the first time.
+
+  The placeholders are touch_device (the libinput device name of the
+  touchscreen), touch_output (the output it is mapped to, e.g. HDMI-A-1), and
+  calibration (a calibrationMatrix element, or empty when uncalibrated). Any
+  literal brace added below has to be doubled.
+-->
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+	<!--
+	  Without mapToOutput a USB touchscreen's coordinates are spread across the
+	  whole desktop rather than the panel it physically belongs to, so taps land in
+	  the wrong place as soon as a second output exists. mouseEmulation lets labwc
+	  turn touch into pointer events, which is what the web app listens for.
+	-->
+	<touch deviceName="{touch_device}" mapToOutput="{touch_output}" mouseEmulation="yes"/>
+
+	<!--
+	  category="touch" rather than the device name on purpose. labwc matches an
+	  unrecognised category value against the device name directly, and this
+	  panel's name carries runs of interior whitespace that are significant, so a
+	  single normalised space anywhere silently stops the rule matching and the
+	  calibration appears to do nothing. "touch" covers every touchscreen, which
+	  is what a wall with one panel wants anyway.
+	-->
+	<libinput>
+		<device category="touch">{calibration}
+		</device>
+	</libinput>
+
+	<windowRules>
+		<!--
+		  The kiosk window. deploy/kiosk-launch.sh runs Chromium in app mode and
+		  maximized rather than with the kiosk switch, because a fullscreen window
+		  is stacked above the layer-shell "top" layer where the on-screen keyboard
+		  lives and hides it completely. See the long comment in that script.
+
+		  identifier matches Chromium's Wayland app_id, which in app mode is
+		  derived from the URL: "chrome-127.0.0.1__-Default". Globbed rather than
+		  spelled out so it survives a port change. In kiosk mode the app_id was
+		  plain "chromium", which is why a chrome-* rule silently matched nothing
+		  while that was still in use.
+
+		  The 26px title strip Chromium draws in app mode is client side and cannot
+		  be removed by serverDecoration="no" or by SetDecorations; both were tried.
+
+		  Note what is NOT set here: skipTaskbar. It looks harmless on a wall with
+		  no taskbar, but it works by removing the window's foreign-toplevel
+		  protocol handle - which is the handle wlrctl needs to raise the window
+		  again after someone taps minimise on that title strip. With skipTaskbar
+		  set, `wlrctl toplevel list` returns nothing and the recovery in
+		  system_service.restore_kiosk() silently does nothing, leaving a blank wall
+		  that only SSH can fix. skipWindowSwitcher is fine: it only hides the
+		  window from Alt-Tab and keeps the handle.
+		-->
+		<windowRule identifier="chrome-*" skipWindowSwitcher="yes"/>
+	</windowRules>
+</openbox_config>

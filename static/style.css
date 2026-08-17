@@ -3367,6 +3367,130 @@ textarea.text-input {
   #alert-banner-dismiss { padding: 4px 14px; font-size: 1.2rem; }
 }
 
+/* ---------- system page ---------- */
+
+#system-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.system-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.system-card h2 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.system-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+}
+
+/* The whole row is the hit target, not just the 20px checkbox - this is operated
+   by a fingertip on a wall, standing up. */
+.system-toggle {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 4px 0;
+  flex: 1;
+}
+
+.system-toggle input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  accent-color: var(--accent);
+}
+
+.system-toggle .row-subtext { display: block; }
+
+#bt-devices { margin-top: 6px; }
+#bt-devices li:last-child { border-bottom: none; }
+#bt-hint { margin: 8px 0 0; }
+
+/* ---------- touch calibration overlay ----------
+
+   Above #night-dim (3000) and the alert banner (3100): calibration takes over the
+   panel completely, and a half-dimmed screen with a crosshair on it would collect
+   taps aimed at whatever was showing through. */
+#calibrate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  background: var(--bg);
+}
+
+#calibrate-instructions,
+#calibrate-confirm {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  max-width: 30rem;
+}
+
+/* The instructions sit at the centre of the screen and the third target is also
+   at the centre, so the text must never eat that tap. */
+#calibrate-instructions { pointer-events: none; }
+#calibrate-instructions #calibrate-cancel { pointer-events: auto; }
+
+#calibrate-instructions h2,
+#calibrate-confirm h2 { margin: 0 0 8px; }
+
+#calibrate-progress {
+  margin: 0 0 16px;
+  color: var(--text-dim);
+}
+
+/* Positioned by its centre, so the coordinate the page believes it drew and the
+   coordinate someone aims at are the same point. */
+#calibrate-target {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 96px;
+  height: 96px;
+  padding: 22px;
+  border: none;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+#calibrate-target svg { width: 100%; height: 100%; display: block; }
+
+#calibrate-confirm {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px 28px;
+}
+
+#calibrate-countdown { margin: 0 0 18px; color: var(--text-dim); }
+
+#calibrate-confirm-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
 /* `!important`, and it's the right call for exactly this rule.
 
    .hidden is the one utility the whole app toggles from JavaScript, and source

@@ -532,6 +532,22 @@ def _build_rrule(
     return f"RRULE:{rule}"
 
 
+def _rfc3339_local(value: str) -> str:
+    """Turn the "YYYY-MM-DDTHH:MM" an <input type="datetime-local"> produces into
+    the RFC3339 string Google's dateTime field requires.
+
+    RFC3339 makes the seconds field mandatory, and datetime-local omits it, so
+    posting the input's value straight through made Google reject every *timed*
+    event with a bare 400 "Bad Request". All-day events were unaffected (they use
+    the date field), which is why this looked like an intermittent fault rather
+    than a broken code path.
+
+    No offset is added on purpose: it is sent alongside an explicit timeZone, and
+    Google reads the dateTime as wall-clock in that zone.
+    """
+    return dt.datetime.fromisoformat(value).isoformat(timespec="seconds")
+
+
 def create_event(
     account: str,
     calendar_id: str,
@@ -558,8 +574,8 @@ def create_event(
         body["start"] = {"date": start}
         body["end"] = {"date": end_exclusive}
     else:
-        body["start"] = {"dateTime": start, "timeZone": time_zone}
-        body["end"] = {"dateTime": end, "timeZone": time_zone}
+        body["start"] = {"dateTime": _rfc3339_local(start), "timeZone": time_zone}
+        body["end"] = {"dateTime": _rfc3339_local(end), "timeZone": time_zone}
 
     rrule = _build_rrule(recurrence_freq, recurrence_until, all_day, time_zone)
     if rrule:
@@ -697,8 +713,8 @@ def update_event(
             body["start"] = {"date": start}
             body["end"] = {"date": end_exclusive}
         else:
-            body["start"] = {"dateTime": start, "timeZone": time_zone}
-            body["end"] = {"dateTime": end, "timeZone": time_zone}
+            body["start"] = {"dateTime": _rfc3339_local(start), "timeZone": time_zone}
+            body["end"] = {"dateTime": _rfc3339_local(end), "timeZone": time_zone}
     elif all_day:
         end_exclusive = (dt.date.fromisoformat(end) + dt.timedelta(days=1)).isoformat()
         if start != current["start"]["date"] or end_exclusive != current["end"]["date"]:
@@ -708,8 +724,8 @@ def update_event(
         if start != _format_datetime_local(current["start"]["dateTime"]) or end != _format_datetime_local(
             current["end"]["dateTime"]
         ):
-            body["start"] = {"dateTime": start, "timeZone": time_zone}
-            body["end"] = {"dateTime": end, "timeZone": time_zone}
+            body["start"] = {"dateTime": _rfc3339_local(start), "timeZone": time_zone}
+            body["end"] = {"dateTime": _rfc3339_local(end), "timeZone": time_zone}
 
     # Recurrence is never touched for an event that's already part of a
     # series - only a previously non-recurring event can have one added.

@@ -11,36 +11,55 @@
     {# The rail is the launcher: every destination is one tap from anywhere,
        with no drawer to open first. Each entry is a plain link so its target
        can be repointed (e.g. Music to something other than /spotify) without
-       touching the shell. #}
+       touching the shell.
+
+       `hidden` comes from inject_globals() and holds the sections switched off on
+       the System page. A hidden section is left out of the rail but its route and
+       page stay live, so the only thing lost is the icon - anything already
+       bookmarked or linked (the Today page's "Open" link, say) still works, and
+       turning it back on needs no deploy. Calendar is deliberately not
+       hideable: it is the reason the thing is on the wall. #}
     <nav id="rail">
+      {% if "today" not in hidden %}
       <a href="/today" class="rail-item" data-nav="/today">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm1 5v5.6l4.2 2.5-.8 1.3L11 13V7h2z"/></svg>
         <span>Today</span>
       </a>
+      {% endif %}
       <a href="/" class="rail-item" data-nav="/">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19 3h-1V1h-2v2H8V1H6v2H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V8h14v11z"/></svg>
         <span>Calendar</span>
       </a>
+      {% if "recipes" not in hidden %}
       <a href="/recipes" class="rail-item" data-nav="/recipes">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M8.1 2v7.2a2.9 2.9 0 0 0 2 2.7V22h1.8V11.9a2.9 2.9 0 0 0 2-2.7V2h-1.6v7.2h-.9V2h-1.6v7.2h-.9V2H8.1zm8.4 0c-.9 1.4-1.4 3-1.4 4.7 0 1.9.8 3.4 2 4V22h1.8V2h-2.4z"/></svg>
         <span>Recipes</span>
       </a>
+      {% endif %}
+      {% if "groceries" not in hidden %}
       <a href="/groceries" class="rail-item" data-nav="/groceries">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M7 18a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm10 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM7.2 14.8l.03-.15.9-1.65h7.45c.75 0 1.41-.41 1.75-1.03l3.24-5.88L18.8 5.5l-3.24 5.9H8.8L4.95 3H1.5v2h2.2l3.6 7.59-1.35 2.44A1.98 1.98 0 0 0 7.7 18H19v-2H8.1c-.14 0-.26-.06-.34-.16l-.56-1.04z"/></svg>
         <span>Groceries</span>
       </a>
+      {% endif %}
+      {% if "weather" not in hidden %}
       <a href="/weather" class="rail-item" data-nav="/weather">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M17.7 9.05a5.5 5.5 0 0 0-10.6-1.3A4.5 4.5 0 0 0 7.5 16.5h9.75a3.75 3.75 0 0 0 .45-7.45zM6.5 5.2 5.1 3.8 3.7 5.2l1.4 1.4 1.4-1.4zM3 11.5H1v2h2v-2zM12 1h-2v2.5h2V1z"/></svg>
         <span>Weather</span>
       </a>
+      {% endif %}
+      {% if "spotify" not in hidden %}
       <a href="/spotify" class="rail-item" data-nav="/spotify">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3h-6z"/></svg>
         <span>Music</span>
       </a>
+      {% endif %}
+      {% if "browser" not in hidden %}
       <a href="/browser" class="rail-item" data-nav="/browser">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-1 17.93A8 8 0 0 1 4.07 13H7v2a2 2 0 0 0 2 2h2v2.93zm7.9-5.93A8 8 0 0 1 13 19.93V18a2 2 0 0 0-2-2H9v-2h5a2 2 0 0 0 2-2v-1h1.9c.06.33.1.66.1 1a8 8 0 0 1-.1 2zM17.5 8H16a2 2 0 0 0-2-2h-1V4.07A8 8 0 0 1 19.42 8H17.5z"/></svg>
         <span>Web</span>
       </a>
+      {% endif %}
       <div class="rail-spacer"></div>
 
       {# What's playing, on every page. Previously the only now-playing UI lived
@@ -59,9 +78,17 @@
         </button>
       </div>
 
-      <a href="/accounts" class="rail-item rail-item--last" data-nav="/accounts">
+      <a href="/accounts" class="rail-item" data-nav="/accounts">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 12a5 5 0 1 0 0-10 5 5 0 0 0 0 10zm0 2c-4.42 0-8 2.24-8 5v3h16v-3c0-2.76-3.58-5-8-5z"/></svg>
         <span>Accounts</span>
+      </a>
+      {# The wall boots straight into the kiosk with no desktop and no way in, so
+         anything that would normally need a settings app - pairing a speaker,
+         straightening out the touchscreen - has to live here or be unreachable
+         without SSH. Not hideable, for the same reason. #}
+      <a href="/system" class="rail-item rail-item--last" data-nav="/system">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M19.14 12.94a7.14 7.14 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.58.24-1.12.55-1.62.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58a7.14 7.14 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32a.5.5 0 0 0 .6.22l2.39-.96c.5.39 1.04.7 1.62.94l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54a7 7 0 0 0 1.62-.94l2.39.96a.5.5 0 0 0 .6-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.58zM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/></svg>
+        <span>System</span>
       </a>
     </nav>
 

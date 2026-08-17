@@ -45,11 +45,15 @@ for (const vp of VIEWPORTS) {
         });
         await page.goto(target);
         await page.waitForTimeout(1200);
-        // 8 destinations now that Groceries has a page; the rail still has to fit a
+        // 9 destinations now that System has a page; the rail still has to fit a
         // 600px panel, which is what the overflow check below is for. That check is
-        // the reason this count is worth asserting - an eighth entry was the one
-        // most likely to push the rail over.
-        await expect(page.locator(".rail-item")).toHaveCount(8);
+        // the reason this count is worth asserting - each new entry is the one most
+        // likely to push the rail over, and System was the ninth.
+        //
+        // Sections can be switched off from /system, which removes rail entries, so
+        // this is the count with everything on - the default, and the state the
+        // fixtures run in.
+        await expect(page.locator(".rail-item")).toHaveCount(9);
         const railFits = await page.evaluate(() => {
           const rail = document.getElementById("rail");
           return rail.scrollHeight <= rail.clientHeight + 1;
