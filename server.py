@@ -644,6 +644,50 @@ def api_system_bluetooth_device(mac, action):
     return jsonify(result), 200 if result.get("ok") else 502
 
 
+@app.route("/api/system/display")
+def api_system_display():
+    """Just the stored settings - deliberately no subprocesses.
+
+    The shell reads this on every page load to apply the brightness, so it is one of
+    the hottest endpoints in the app. It used to also report the output's power state
+    and whether swayidle was up, which meant spawning `wlopm` and `pgrep` on every
+    single page load; that was enough added latency to make an unrelated Spotify
+    layout test start failing under load. Neither value was read by the page.
+
+    The diagnostics live at /api/system/display/power, for whoever actually wants
+    them.
+    """
+    return jsonify(preferences.display_settings())
+
+
+@app.route("/api/system/display/power")
+def api_system_display_power():
+    return jsonify(
+        {
+            "power": system_service.display_power_state(),
+            "swayidle": system_service._swayidle_running(),
+        }
+    )
+
+
+@app.route("/api/system/display", methods=["POST"])
+def api_system_display_set():
+    try:
+        settings = preferences.set_display_settings(**(request.json or {}))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    # The panel-off stage lives in swayidle, so a changed timeout has to be pushed
+    # out to it rather than waiting for the next restart.
+    if "display_off_minutes" in (request.json or {}):
+        system_service.sync_display_off_from_prefs()
+    return jsonify(settings)
+
+
+@app.route("/api/system/display/wake", methods=["POST"])
+def api_system_display_wake():
+    return jsonify(system_service.wake_display())
+
+
 @app.route("/api/system/touch")
 def api_system_touch():
     return jsonify(system_service.calibration_state())
@@ -709,6 +753,10 @@ if __name__ == "__main__":
     # trusting a device only makes the wall accept an incoming connection, and its
     # [Policy] reconnect plugin only retries after an unexpected disconnect.
     bluetooth_service.start_autoconnect()
+
+    # And the panel-off stage of sleep, for the same reason: prefs are the source of
+    # truth, swayidle is derived from them.
+    system_service.sync_display_off_from_prefs()
 
     # 5000 is the real port everywhere - the kiosk launcher and the Google OAuth
     # redirect URI are both pinned to it. PORT exists so a second instance can be

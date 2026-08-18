@@ -122,7 +122,7 @@ def check_no_global_script_collisions():
     import re
 
     static = pathlib.Path(__file__).resolve().parent.parent / "static"
-    shell = ["panel.js", "themes.js", "weather.js", "nav.js", "timers.js"]
+    shell = ["panel.js", "themes.js", "weather.js", "nav.js", "timers.js", "brightness.js"]
     pages = ["calendar.js", "spotify.js", "recipes.js", "today.js",
              "browser.js", "accounts.js", "groceries.js"]
     patterns = (
@@ -960,9 +960,9 @@ def check_prefs_setters_do_not_clobber_each_other():
             )
 
 
-def _raises(exc_type, fn, *args):
+def _raises(exc_type, fn, *args, **kwargs):
     try:
-        fn(*args)
+        fn(*args, **kwargs)
     except exc_type:
         return True
     except Exception:
@@ -1076,6 +1076,125 @@ def check_rc_xml_render_is_well_formed():
         "the kiosk window rule targets Chromium's app-mode app_id",
         rule is not None and rule.get("identifier") == "chrome-*",
         rule.get("identifier") if rule is not None else "no rule",
+    )
+
+
+def check_display_settings_validation():
+    """Brightness and sleep settings, and the floor under brightness.
+
+    The floor is not cosmetic. This panel has no software backlight - no DDC/CI, no
+    /sys/class/backlight - so brightness darkens the image while the lamp stays lit.
+    Below about 0.2 the picture is gone but the wall still glows, so lower values buy
+    nothing and just look broken. Clamping in the setter is what stops a stray POST
+    (or a slider someone dragged to 0) from getting there.
+    """
+    print("display settings")
+    import tempfile
+    from unittest.mock import patch
+
+    from app import preferences
+
+    with tempfile.TemporaryDirectory() as tmp:
+        with patch.object(preferences, "PREFS_FILE", pathlib.Path(tmp) / "prefs.json"):
+            defaults = preferences.display_settings()
+            check("full brightness by default", defaults["brightness"] == 1.0)
+            check("sleep on by default", defaults["sleep_enabled"] is True)
+            check("night-gated by default", defaults["sleep_at_night_only"] is True,
+                  "a wall that hides the calendar at 2pm is not a calendar")
+
+            check(
+                "brightness is clamped to the floor, not honoured at 0",
+                preferences.set_display_settings(brightness=0.0)["brightness"]
+                == preferences.MIN_BRIGHTNESS,
+            )
+            check(
+                "and clamped at the top",
+                preferences.set_display_settings(brightness=4.0)["brightness"] == 1.0,
+            )
+            check(
+                "a sane value is kept",
+                preferences.set_display_settings(brightness=0.45)["brightness"] == 0.45,
+            )
+            check(
+                "nonsense is refused rather than stored",
+                _raises(ValueError, preferences.set_display_settings, brightness="bright"),
+            )
+
+            # The screen-off delay drives swayidle's command line, so only known
+            # values are allowed through.
+            check(
+                "an unlisted screen-off delay is refused",
+                _raises(ValueError, preferences.set_display_settings, display_off_minutes=7),
+            )
+            check(
+                "0 means never, and is allowed",
+                preferences.set_display_settings(display_off_minutes=0)["display_off_minutes"] == 0,
+            )
+            # Two minutes is the floor: less and the wall blanks while someone reads it.
+            check(
+                "sleep delay has a floor",
+                preferences.set_display_settings(sleep_after_minutes=0)["sleep_after_minutes"] == 2,
+            )
+            check(
+                "unknown keys are ignored rather than stored",
+                "nonsense" not in preferences.load_prefs(),
+            )
+
+            # And it must not clobber neighbours in the same file.
+            preferences.set_section_hidden("groceries", True)
+            preferences.set_display_settings(brightness=0.6)
+            check(
+                "saving brightness keeps hidden_sections",
+                preferences.hidden_sections() == {"groceries"},
+            )
+
+
+def check_dimmers_compose_without_going_black():
+    """The three dimmers in nav.js multiply, and the product has to be clamped.
+
+    brightness x night x sleep at their minimums is about 0.008 - a black screen. A
+    black screen cannot be tapped back to life, because you cannot see what to tap,
+    and the only recovery would be SSH. This mirrors nav.js's arithmetic so the
+    clamp cannot be dropped without a failure here.
+    """
+    print("dimmer composition")
+    import re
+
+    nav = (pathlib.Path(__file__).resolve().parent.parent / "static" / "nav.js").read_text()
+
+    def constant(name):
+        match = re.search(rf"^const {name} = ([0-9.]+);", nav, re.MULTILINE)
+        return float(match.group(1)) if match else None
+
+    night = constant("NIGHT_FACTOR")
+    sleep = constant("SLEEP_FACTOR")
+    max_dim = constant("MAX_DIM_OPACITY")
+    floor = 0.2  # preferences.MIN_BRIGHTNESS
+
+    check("nav.js still defines all three constants", None not in (night, sleep, max_dim),
+          f"night={night} sleep={sleep} max={max_dim}")
+    check("the clamp leaves something visible", max_dim is not None and max_dim < 1.0,
+          f"MAX_DIM_OPACITY={max_dim}")
+
+    worst = floor * night * sleep
+    clamped = min(max_dim, max(0.0, 1 - worst))
+    check(
+        "the worst case (min brightness, night, asleep) is not fully black",
+        clamped <= max_dim and 1 - clamped > 0.0,
+        f"unclamped opacity would be {1 - worst:.4f}, clamped to {clamped}",
+    )
+
+    # The tap that wakes the wall must be gated on the resting *states*, not on the
+    # overlay being on screen - the overlay is now visible at any brightness below
+    # 100%, and swallowing the first tap at a brightness someone chose would make the
+    # wall feel broken at every setting but full.
+    check(
+        "the wake handler keys off asleep/night, not overlay visibility",
+        "if (asleep || nightDimActive())" in nav,
+    )
+    check(
+        "and it is still registered in the capture phase",
+        re.search(r'addEventListener\(\s*"pointerdown",[\s\S]{0,400}?true\s*\)', nav) is not None,
     )
 
 
@@ -1369,6 +1488,8 @@ def main():
         check_prefs_setters_do_not_clobber_each_other,
         check_touch_calibration_maths,
         check_rc_xml_render_is_well_formed,
+        check_display_settings_validation,
+        check_dimmers_compose_without_going_black,
         check_bluetooth_success_strings,
         check_bluetooth_autoconnect,
         check_unconfirmed_calibration_cannot_survive_a_restart,

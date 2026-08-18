@@ -126,6 +126,12 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M15 1H9v2h6V1zm-4 13h2V8h-2v6zm8.03-6.61l1.42-1.42a11 11 0 0 0-1.41-1.41l-1.42 1.42A9 9 0 1 0 12 22a9 9 0 0 0 7.03-14.61zM12 20a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>
           <span id="timer-chip-text"></span>
         </button>
+        {# Brightness has to be reachable in one tap from wherever the wall happens
+           to be, which is why it is shell furniture and not a row on /system: the
+           moment you want it is the moment the wall is too bright to read. #}
+        <button id="brightness-chip" aria-label="Brightness and sleep">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0-5v3h-.01L12 2zm0 17v3h-.01L12 19zM2 11.99h3v.02H2zm17 0h3v.02h-3zM4.22 5.64l2.12 2.12-1.41 1.41L2.81 7.05zm12.44 12.44 2.12 2.12-1.41 1.41-2.12-2.12zM19.78 5.64l-2.12 2.12 1.41 1.41 2.12-2.12zM7.34 18.08l-2.12 2.12 1.41 1.41 2.12-2.12z"/></svg>
+        </button>
         <div id="top-bar-content">
           {% block topbar %}{% endblock %}
         </div>
@@ -141,9 +147,70 @@
       </main>
     </div>
 
-    {# Dims the room-facing screen after dark instead of burning a lit calendar at
-       3am. Sits above everything and is dismissed by any touch. #}
+    {# Dims the room-facing screen instead of burning a lit calendar at 3am. Carries
+       both the brightness setting and the automatic after-dark dimming; nav.js
+       multiplies them into one opacity. Purely visual - it does not swallow taps,
+       because a wall someone deliberately set to 40% must still be usable at 40%.
+       Only the sleep screen below eats the waking tap. #}
     <div id="night-dim" class="hidden" aria-hidden="true"></div>
+
+    {# Sleep: the faint-clock stage. Not the same thing as dimming - it replaces the
+       page rather than shading it, so a dark kitchen gets a clock instead of a
+       greyed-out calendar, and the first tap is swallowed waking it rather than
+       landing on whatever was underneath.
+
+       The deeper stage - actually powering the panel off - is deliberately not here.
+       It is swayidle plus wlopm at the session level, because waking has to work
+       when there is nothing on screen to tap on and no guarantee this page is even
+       alive. See app/system_service.py. #}
+    <div id="sleep-screen" class="hidden">
+      <div id="sleep-time"></div>
+      <div id="sleep-date"></div>
+      <div id="sleep-hint">Tap to wake</div>
+    </div>
+
+    <div id="brightness-overlay" class="modal-overlay hidden">
+      <div id="brightness-panel" class="modal-panel">
+        <button id="brightness-close" aria-label="Close">&times;</button>
+        <h2>Brightness</h2>
+        <div id="brightness-row">
+          <svg class="brightness-icon brightness-icon--low" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg>
+          {# A range input rather than +/- buttons: dragging is the gesture that lets
+             you stop at the point it looks right, which is the whole task. #}
+          <input id="brightness-range" type="range" min="20" max="100" step="5" value="100"
+                 aria-label="Screen brightness">
+          <svg class="brightness-icon" viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 7a5 5 0 1 0 0 10 5 5 0 0 0 0-10zm0-6v3m0 16v3M1 12h3m16 0h3M4.2 4.2l2.1 2.1m11.4 11.4 2.1 2.1M19.8 4.2l-2.1 2.1M6.3 17.7l-2.1 2.1" stroke="currentColor" stroke-width="2" fill="none"/></svg>
+          <span id="brightness-value">100%</span>
+        </div>
+        {# The honest caveat, on the screen where someone would otherwise conclude the
+           slider is broken. #}
+        <p class="field-hint">
+          This darkens the picture - the panel's backlight has no software control, so
+          the lowest settings glow softly in a dark room rather than going black.
+        </p>
+
+        <h2>Sleep</h2>
+        <label class="system-toggle" for="sleep-enabled">
+          <input type="checkbox" id="sleep-enabled">
+          <span>
+            Sleep when idle
+            <span class="row-subtext" id="sleep-enabled-sub"></span>
+          </span>
+        </label>
+        <label class="system-toggle" for="sleep-night-only">
+          <input type="checkbox" id="sleep-night-only">
+          <span>
+            Only after dark
+            <span class="row-subtext">Off means it also sleeps during the day, so the calendar hides itself.</span>
+          </span>
+        </label>
+        <div id="display-off-row">
+          <label for="display-off-minutes">Turn the screen off after</label>
+          <select id="display-off-minutes" class="text-input"></select>
+        </div>
+        <button id="sleep-now" class="full-width-button" type="button">Sleep now</button>
+      </div>
+    </div>
 
     <div id="timer-overlay" class="modal-overlay hidden">
       <div id="timer-panel" class="modal-panel">
@@ -177,17 +244,21 @@
        panel.js   - initPanel, used by every overlay below
        themes.js  - defines applyMonthTheme(), called by nav.js and calendar.js
        weather.js - defines onWeather(), which nav.js subscribes to for sunset
-       nav.js     - shell: clock, rail, now-playing, dimming, idle
+       nav.js     - shell: clock, rail, now-playing, dimming, sleep, idle
        timers.js  - uses showToast/wakeScreen from nav.js at runtime
+       brightness.js - drives nav.js's dimming through displaySettings() /
+                    applyDisplaySettings() / previewBrightness() / sleepNow(), so it
+                    has to load after it
        alerts.js  - owns the severe-weather poll for the whole app and calls
                     wakeScreen() from nav.js, so it loads after it
-     panel.js used to live on the calendar page; the weather and timer overlays
-     are shell furniture, so it had to move up here. #}
+     panel.js used to live on the calendar page; the weather, timer and brightness
+     overlays are shell furniture, so it had to move up here. #}
   <script src="/static/panel.js?v={{ build }}"></script>
   <script src="/static/themes.js?v={{ build }}"></script>
   <script src="/static/weather.js?v={{ build }}"></script>
   <script src="/static/nav.js?v={{ build }}"></script>
   <script src="/static/timers.js?v={{ build }}"></script>
+  <script src="/static/brightness.js?v={{ build }}"></script>
   <script src="/static/alerts.js?v={{ build }}"></script>
   {% block scripts %}{% endblock %}
 </body>

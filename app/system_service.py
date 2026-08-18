@@ -134,6 +134,119 @@ def restore_kiosk() -> dict:
     return {"ok": result.returncode == 0, "app_id": app_id}
 
 
+# ---------- powering the panel off ----------
+#
+# The deep stage of sleep, and deliberately NOT done from the page.
+#
+# Brightness and the faint-clock stage are a CSS overlay the page owns, because they
+# have to respond instantly and be adjustable while you look at them. Powering the
+# panel off is different: whatever turns it back on has to work when there is
+# nothing on screen to tap *on*. If waking depended on our JavaScript, a page that
+# had crashed or been reloaded would leave a dark wall recoverable only over SSH -
+# exactly the failure mode this feature is supposed to avoid.
+#
+# So it is swayidle plus wlopm, at the session level: swayidle listens to labwc's
+# ext_idle_notifier_v1 and fires `resume` on *any* seat input, before the page is
+# involved at all. Verified on the wall - idle 10s -> panel off, one pointer event ->
+# back on, and wlopm leaves the mode alone (1920x1080@60 still current afterwards),
+# so the window is never reconfigured and the page never reflows.
+#
+# One debugging note: `grim` fails outright while the output is powered off, so a
+# screenshot cannot be used to check this state.
+
+OUTPUT_NAME = "HDMI-A-1"
+
+
+def _swayidle_running() -> bool:
+    # Queries about the display are read by the shell on every page, so they answer
+    # rather than raise - see display_power_state.
+    try:
+        return _run(["pgrep", "-x", "swayidle"]).returncode == 0
+    except SystemActionFailed:
+        return False
+
+
+def stop_display_off() -> None:
+    _run(["pkill", "-x", "swayidle"])
+
+
+def apply_display_off(minutes: int) -> dict:
+    """(Re)start swayidle with the configured timeout. 0 disables it.
+
+    Restarted rather than reconfigured because swayidle takes its timeouts on the
+    command line. Killing it first is what makes this idempotent - two swayidles
+    would both fire and fight over the output.
+    """
+    stop_display_off()
+    if not minutes:
+        return {"ok": True, "enabled": False}
+
+    try:
+        subprocess.Popen(
+            [
+                "swayidle",
+                "-w",
+                "timeout",
+                str(minutes * 60),
+                f"wlopm --off {OUTPUT_NAME}",
+                "resume",
+                f"wlopm --on {OUTPUT_NAME}",
+            ],
+            env=_session_env(),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            # Detached, so it outlives the request and is not killed with the
+            # Flask worker that happened to start it.
+            start_new_session=True,
+        )
+    except (OSError, ValueError) as exc:
+        raise SystemActionFailed(
+            "Could not start swayidle, so the screen will not power off. "
+            "(apt install swayidle wlopm)"
+        ) from exc
+    return {"ok": True, "enabled": True, "minutes": minutes}
+
+
+def sync_display_off_from_prefs() -> dict:
+    """Called at startup and whenever the setting changes, so prefs stay the single
+    source of truth for it - the same arrangement as the calibration."""
+    minutes = preferences.display_settings()["display_off_minutes"]
+    try:
+        return apply_display_off(minutes)
+    except SystemActionFailed:
+        return {"ok": False, "enabled": False}
+
+
+def wake_display() -> dict:
+    """Force the panel back on.
+
+    swayidle's `resume` already covers a tap, so this is the escape hatch for the
+    case it cannot cover: something went wrong and the wall is dark. Flask listens
+    on the LAN, so it can be hit from a phone.
+    """
+    result = _run(["wlopm", "--on", OUTPUT_NAME])
+    return {"ok": result.returncode == 0, "output": OUTPUT_NAME}
+
+
+def display_power_state() -> str | None:
+    """"on" / "off", or None when wlopm cannot say.
+
+    Answers instead of raising, deliberately. The shell reads /api/system/display on
+    every page, and a 503 there is logged by Chromium as a failed resource load on
+    every single page load - which is both noise in the service log and a console
+    error the layout tests (rightly) treat as a regression. Same rule the Spotify
+    now-playing poll follows: a shell-wide poll degrades, it does not fail.
+    """
+    try:
+        result = _run(["wlopm"])
+    except SystemActionFailed:
+        return None
+    for line in result.stdout.splitlines():
+        if line.startswith(OUTPUT_NAME):
+            return line.split()[-1]
+    return None
+
+
 # ---------- touchscreen calibration ----------
 
 

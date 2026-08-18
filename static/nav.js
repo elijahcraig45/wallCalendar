@@ -10,15 +10,21 @@ document.querySelectorAll(".rail-item").forEach((item) => {
 
 const clockTime = document.getElementById("clock-time");
 const clockDate = document.getElementById("clock-date");
+// The sleep screen shows the same clock, large and faint - the one thing worth
+// keeping visible when the wall is resting.
+const sleepTime = document.getElementById("sleep-time");
+const sleepDate = document.getElementById("sleep-date");
 
 function renderClock() {
   const now = new Date();
-  clockTime.textContent = now.toLocaleTimeString(undefined, {
-    hour: "numeric", minute: "2-digit",
-  });
-  clockDate.textContent = now.toLocaleDateString(undefined, {
+  const time = now.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const date = now.toLocaleDateString(undefined, {
     weekday: "short", month: "short", day: "numeric",
   });
+  clockTime.textContent = time;
+  clockDate.textContent = date;
+  if (sleepTime) sleepTime.textContent = time;
+  if (sleepDate) sleepDate.textContent = date;
 }
 
 renderClock();
@@ -119,14 +125,44 @@ applyMonthTheme(new Date().getMonth() + 1);
    if weather is unavailable it falls back to a fixed evening window. Any touch
    wakes it for a few minutes. */
 
-const NIGHT_DIM_OPACITY = 0.82;
+/* Three dimmers stack here, and keeping them straight is the whole job:
+
+     brightness  what someone set by hand. Applies always.
+     night       extra dimming after sunset, cleared for a few minutes by a touch.
+     sleep       the faint-clock stage; replaces the page rather than shading it.
+
+   They compose multiplicatively into ONE opacity, clamped once at the end. Left
+   unclamped, brightness at minimum after sunset while asleep multiplies out to a
+   black screen - and a black screen cannot be tapped back, because you cannot see
+   what to tap. MAX_DIM_OPACITY is what guarantees something is always visible.
+
+   Note what none of this touches: the actual backlight. This panel reports no
+   DDC/CI and HDMI gets no /sys/class/backlight, so there is nothing to turn down -
+   only the picture. Genuinely dark means powering the output off, which is
+   swayidle's job, not this file's. */
+
+const NIGHT_FACTOR = 0.35;
+const SLEEP_FACTOR = 0.12;
+const MAX_DIM_OPACITY = 0.94;
 const WAKE_MINUTES = 3;
 const FALLBACK_DIM_HOUR = 22;
 const FALLBACK_WAKE_HOUR = 6;
 
 const nightDim = document.getElementById("night-dim");
+const sleepScreen = document.getElementById("sleep-screen");
 let sunTimes = null;
 let awakeUntil = 0;
+let asleep = false;
+let sleepTimer = null;
+
+// Defaults until /api/system/display answers, chosen so a wall whose server is
+// mid-restart looks normal rather than dimmed.
+let display = {
+  brightness: 1,
+  sleep_enabled: true,
+  sleep_after_minutes: 10,
+  sleep_at_night_only: true,
+};
 
 function minutesOfDay(date) {
   return date.getHours() * 60 + date.getMinutes();
@@ -150,23 +186,67 @@ function isNightNow() {
   return hour >= FALLBACK_DIM_HOUR || hour < FALLBACK_WAKE_HOUR;
 }
 
+/** True while the after-dark dimming is in force - i.e. it is night and nobody has
+ *  touched the wall recently enough to have cleared it. */
+function nightDimActive() {
+  return isNightNow() && Date.now() >= awakeUntil;
+}
+
 function applyDim() {
-  const shouldDim = isNightNow() && Date.now() >= awakeUntil;
-  nightDim.style.opacity = shouldDim ? String(NIGHT_DIM_OPACITY) : "0";
-  nightDim.classList.toggle("hidden", !shouldDim);
+  const factor =
+    display.brightness * (nightDimActive() ? NIGHT_FACTOR : 1) * (asleep ? SLEEP_FACTOR : 1);
+  const opacity = Math.min(MAX_DIM_OPACITY, Math.max(0, 1 - factor));
+
+  nightDim.style.opacity = String(opacity);
+  // Still hidden outright at full brightness: a transparent overlay is one more
+  // surface for the compositor to blend on every frame for no reason.
+  nightDim.classList.toggle("hidden", opacity <= 0.001);
+  sleepScreen.classList.toggle("hidden", !asleep);
+}
+
+/** Enter the faint-clock stage. Also reachable from the brightness panel. */
+function sleepNow() {
+  asleep = true;
+  applyDim();
 }
 
 function wakeScreen() {
   awakeUntil = Date.now() + WAKE_MINUTES * 60 * 1000;
+  asleep = false;
   applyDim();
+  scheduleSleep();
 }
 
-// Capture phase, so the touch that wakes a dimmed screen isn't also treated as a
-// tap on whatever happens to be underneath it.
+/** Arm the idle countdown into sleep. Called from resetIdleTimer, so it shares that
+ *  one set of interaction listeners rather than adding a fifth. */
+function scheduleSleep() {
+  clearTimeout(sleepTimer);
+  if (!display.sleep_enabled) return;
+  sleepTimer = setTimeout(
+    () => {
+      // Night-gated by default: a kitchen calendar that hides itself at 2pm has
+      // stopped being a calendar. The brightness panel can turn the gate off.
+      if (display.sleep_at_night_only && !isNightNow()) {
+        scheduleSleep();
+        return;
+      }
+      sleepNow();
+    },
+    Math.max(2, display.sleep_after_minutes) * 60 * 1000
+  );
+}
+
+/* Capture phase, so the touch that wakes the wall isn't also treated as a tap on
+   whatever happens to be underneath it.
+
+   Deliberately gated on the *states* that mean "the wall is resting", not on the
+   overlay being visible. The overlay is now visible whenever brightness is below
+   100%, and swallowing the first tap at a brightness someone chose on purpose would
+   make the wall feel broken at every setting but full. */
 document.addEventListener(
   "pointerdown",
   (e) => {
-    if (!nightDim.classList.contains("hidden")) {
+    if (asleep || nightDimActive()) {
       e.preventDefault();
       e.stopPropagation();
       wakeScreen();
@@ -174,6 +254,45 @@ document.addEventListener(
   },
   true
 );
+
+/* The three hooks brightness.js drives this through. Kept here rather than there
+   because this file owns the overlay, the sleep state and the idle countdown, and
+   two owners of one opacity is how you get a wall that flickers between them. */
+
+function displaySettings() {
+  return display;
+}
+
+function applyDisplaySettings(settings) {
+  display = { ...display, ...settings };
+  applyDim();
+  scheduleSleep();
+}
+
+/** Brightness without persisting it, for live feedback while a slider is dragged. */
+function previewBrightness(value) {
+  display.brightness = value;
+  applyDim();
+}
+
+async function loadDisplaySettings() {
+  // Not while the panel is open: re-reading mid-drag would yank the slider back to
+  // the last saved value, because brightness.js applies each drag locally and only
+  // saves on release.
+  const panel = document.getElementById("brightness-overlay");
+  if (panel && !panel.classList.contains("hidden")) return;
+
+  try {
+    const resp = await fetch("/api/system/display");
+    if (!resp.ok) return;
+    display = { ...display, ...(await resp.json()) };
+  } catch (e) {
+    // Keep the defaults - a wall that can't reach its own server should look
+    // normal, not dark.
+  }
+  applyDim();
+  scheduleSleep();
+}
 
 if (typeof onWeather === "function") {
   onWeather((data) => {
@@ -184,6 +303,15 @@ if (typeof onWeather === "function") {
 
 applyDim();
 setInterval(applyDim, 60 * 1000);
+
+loadDisplaySettings();
+/* Re-read on the same slow cadence as the build check. Two reasons: the setting can
+   be changed from a phone on the LAN (Flask listens there), and it closes a race
+   where the page loads before the server has finished starting and would otherwise
+   sit at full brightness until someone reloaded it. Cheap now that the endpoint is
+   prefs-only with no subprocesses behind it. */
+const DISPLAY_POLL_MS = 60 * 1000;
+setInterval(loadDisplaySettings, DISPLAY_POLL_MS);
 
 /* Note on getting a minimised window back: it is NOT done from here.
 
@@ -227,6 +355,9 @@ function resetIdleTimer() {
   if (window.location.pathname !== "/") {
     returnHomeTimer = setTimeout(() => window.location.assign("/"), RETURN_HOME_MS);
   }
+
+  // Sleep rides on this same set of listeners rather than registering its own.
+  scheduleSleep();
 }
 
 ["pointerdown", "keydown", "wheel", "touchstart"].forEach((evt) => {

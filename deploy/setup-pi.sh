@@ -66,13 +66,27 @@ sudo apt-get install -y --no-install-recommends \
 #                pairing agent, which is why app/bluetooth_service.py shells out
 #                to it instead of talking to org.bluez directly.
 #   libinput-tools  device enumeration for touchscreen calibration.
+#   swayidle     fires when nobody has touched the wall for a while, and - the part
+#                that matters - fires `resume` on ANY seat input. That is what makes
+#                waking the panel independent of the web page: if it depended on our
+#                JavaScript, a crashed or reloading page would leave a dark wall
+#                recoverable only over SSH.
+#   wlopm        powers the output off and back on via
+#                zwlr_output_power_manager_v1. Unlike `wlr-randr --off` it leaves the
+#                mode alone, so the window is never reconfigured and the page never
+#                reflows. (Note for debugging: `grim` fails outright while the output
+#                is off.)
+#
+# This panel has no software backlight - it answers no DDC/CI and HDMI gets no
+# /sys/class/backlight entry - so dimming darkens the picture and only powering the
+# output off is genuinely dark. ddcutil and gammastep were both tried and removed.
 #
 # No `usermod -aG bluetooth` here: on this image Debian's D-Bus policy already
 # lets a normal user pair and change adapter settings, verified on BlueZ 5.82. If
 # a future image tightens that, every Bluetooth call fails with NotAuthorized and
 # the fix is to add the group and restart wallcalendar.service.
 sudo apt-get install -y --no-install-recommends \
-  squeekboard wlrctl bluez libinput-tools
+  squeekboard wlrctl bluez libinput-tools swayidle wlopm
 
 # Security updates, applied on their own. This is an always-on, internet-connected
 # device on a home network that nobody logs into for months at a time - exactly the

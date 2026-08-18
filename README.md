@@ -107,6 +107,71 @@ block on the Today page. The route and the API keep serving, so nothing is delet
 and turning it back on is immediate. Calendar is not in the list — it is the reason
 the thing is on the wall.
 
+### Brightness and sleep
+
+The brightness chip in the top bar (next to the timer chip) opens a slider plus the
+sleep settings. It is shell furniture rather than a row on /system on purpose: the
+moment you want it is the moment the wall is too bright to read comfortably, and that
+should not be four taps away.
+
+**There is no software backlight on this panel, and that shapes everything else.** It
+answers no DDC/CI (`ddcutil detect` → "I2C slave address x37 is unresponsive") and an
+HDMI output gets no `/sys/class/backlight` entry. So the slider darkens the *picture*
+while the lamp stays lit, which means there is a floor — below roughly 20% the image
+is gone but the wall still glows faintly, so `MIN_BRIGHTNESS` clamps there rather than
+pretending. Anything genuinely dark has to power the output off. `ddcutil` and
+`gammastep` were both installed, tried and removed; gamma was rejected because it
+needs a resident process per level, snaps to full brightness if that process dies,
+and is invisible to `grim`, so every change would need someone standing at the wall.
+
+Sleep is staged, and the two stages are deliberately implemented in different places:
+
+| Stage | After | What it is | Who owns it |
+|---|---|---|---|
+| Faint clock | 10 min idle, after dark | A full-bleed screen with a large dim clock | `static/nav.js` |
+| Panel off | 40 min idle | The output actually powered down | `swayidle` + `wlopm` |
+
+The split is not arbitrary. The faint-clock stage has to respond instantly and be
+adjustable while you look at it, so it belongs in the page. Powering the panel off
+must be wakeable when there is nothing on screen to tap *on* — if that depended on
+our JavaScript, a page that had crashed or was mid-reload would leave a dark wall
+recoverable only over SSH, which is the exact failure this feature is meant to avoid.
+So it is `swayidle`, which listens to labwc's `ext_idle_notifier_v1` and fires
+`resume` on **any** seat input before the page is involved. `wlopm` is used rather
+than `wlr-randr --off` because it leaves the mode alone: the window is never
+reconfigured and the page never reflows.
+
+Auto-sleep is **night-gated by default** — a kitchen calendar that hides itself at 2pm
+has stopped being a calendar. "Sleep now" works at any hour, and the gate can be
+turned off.
+
+Three things that are easy to get wrong here, all of which were:
+
+- **The three dimmers multiply, and the product must be clamped.** brightness × night
+  × sleep at their minimums is about 0.008 — a black screen, which cannot be tapped
+  back because you cannot see what to tap. `MAX_DIM_OPACITY` is the guarantee that
+  something stays visible; `tests/api_checks.py` mirrors the arithmetic so the clamp
+  cannot quietly be dropped.
+- **`#night-dim` needs `pointer-events: none`.** It is fixed and full-bleed, and it is
+  now on screen at *any* brightness below 100%, so without that it hit-tests over the
+  whole page and setting the wall to 90% made the calendar untappable. It got away
+  with this while the overlay only appeared during after-dark dimming, where the
+  capture-phase handler was consuming the tap anyway.
+- **The wake handler keys off the resting *states*, not overlay visibility.** Gating
+  on "is the overlay showing" would swallow the first tap at every brightness someone
+  chose on purpose. Sleep swallows the waking tap; hand-dimming does not.
+
+`/api/system/display` is read by the shell on every page load, so it returns stored
+settings and nothing else. It briefly also reported the output's power state and
+whether swayidle was up, which meant spawning `wlopm` and `pgrep` per page load —
+enough added latency to start failing an unrelated Spotify layout test under load.
+Those live at `/api/system/display/power` now.
+
+Two things it does not fix: the 26px Chromium title strip does not dim with the page
+(see below), so between the two sleep stages it is the brightest thing on the wall;
+and `grim` fails outright while the output is powered off, which is worth knowing
+before debugging that state.
+
 ### Typing on the wall
 
 The on-screen keyboard was invisible for weeks, and the cause was not the keyboard.

@@ -2234,6 +2234,17 @@ textarea.text-input {
   /* Slow enough not to look like a glitch, quick enough to feel responsive. */
   transition: opacity 1.2s ease;
   z-index: 3000;
+  /* Required, not cosmetic. A fixed full-bleed element swallows every pointer event
+     that lands on it, and this overlay is now on screen at ANY brightness below 100%
+     - so without this, setting the wall to 90% made the entire calendar untappable.
+     It got away with it while the overlay only appeared during after-dark dimming,
+     where nav.js's capture-phase handler was consuming the tap anyway.
+
+     Swallowing the waking tap still works: that is done by a listener on `document`
+     in the capture phase, which sees the event regardless of what this element does
+     with hit-testing. The sleep screen deliberately does NOT set this - there, being
+     the thing you physically tap is the point. */
+  pointer-events: none;
 }
 
 /* ---------- timers ---------- */
@@ -3365,6 +3376,135 @@ textarea.text-input {
   #alert-banner-event { font-size: 1rem; }
   #alert-banner-area { display: none; }
   #alert-banner-dismiss { padding: 4px 14px; font-size: 1.2rem; }
+}
+
+/* ---------- brightness & sleep ---------- */
+
+#brightness-chip {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Matches the timer chip's target: this is a fingertip on a wall. */
+  min-width: 44px;
+  min-height: 44px;
+  padding: 6px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+#brightness-chip svg { width: 24px; height: 24px; }
+
+/* Every overlay in here sizes and pads itself rather than inheriting from
+   .modal-panel, which only supplies the surface, the radius and the scroll cap.
+   Omitting this stretched the panel to nearly the full 1920px and left the close
+   button floating off the corner. */
+#brightness-panel { padding: 22px; width: min(560px, 88vw); }
+#brightness-panel h2 { margin: 0 0 14px; font-size: 1.2rem; }
+/* The second section heading needs air above it; the first must not gain any. */
+#brightness-panel h2 + h2,
+#brightness-panel .field-hint + h2 { margin-top: 22px; }
+
+#brightness-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.8rem;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+#brightness-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 6px;
+}
+
+.brightness-icon {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  color: var(--text-dim);
+}
+
+.brightness-icon--low { width: 16px; height: 16px; }
+
+/* Tall enough to hit while standing at the wall - the default track is about 4px,
+   which is not a touch target. */
+#brightness-range {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  accent-color: var(--accent);
+}
+
+#brightness-value {
+  flex: 0 0 auto;
+  min-width: 3.4em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+#display-off-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 48px;
+}
+
+#display-off-row select { flex: 0 0 auto; width: auto; min-height: 44px; }
+
+/* ---------- the sleep screen ----------
+   Above the dimming overlay (3000) and the alert banner (3100), because it replaces
+   the page rather than shading it. Below the calibration overlay (4000), which takes
+   over the panel completely.
+
+   An urgent weather warning still gets through: alerts.js calls wakeScreen(), which
+   clears the sleep state, so the banner is never left behind this. */
+#sleep-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 3200;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* Not pure white on black: at 3am in a dark kitchen a bright clock is the thing
+     that gets a wall display unplugged. This is the faintest that still reads from
+     across the room on this panel. */
+  color: #6d7480;
+  user-select: none;
+}
+
+#sleep-time {
+  font-size: clamp(4rem, 16vw, 13rem);
+  font-weight: 300;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+#sleep-date {
+  font-size: clamp(1rem, 3vw, 2rem);
+  letter-spacing: 0.04em;
+}
+
+#sleep-hint {
+  margin-top: 18px;
+  font-size: 0.85rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  /* Dimmer than the clock: it's an instruction, not information. */
+  color: #40454e;
 }
 
 /* ---------- system page ---------- */
