@@ -336,6 +336,101 @@ document.getElementById("kb-toggle").addEventListener("click", async () => {
   if (result) showToast(result.visible ? "Keyboard shown" : "Keyboard hidden");
 });
 
+/* ---------- followed teams ---------- */
+
+const followedList = document.getElementById("followed-teams");
+const followLeague = document.getElementById("follow-league");
+const followTeam = document.getElementById("follow-team");
+
+let followed = [];
+
+async function loadFollowed() {
+  const [leagues, current] = await Promise.all([
+    fetch("/api/sports/leagues").then((r) => r.json()).catch(() => []),
+    fetch("/api/sports/following").then((r) => r.json()).catch(() => ({ teams: [] })),
+  ]);
+
+  if (!followLeague.options.length) {
+    leagues.forEach((league) => {
+      const option = document.createElement("option");
+      option.value = league.key;
+      option.textContent = league.label;
+      followLeague.append(option);
+    });
+    loadTeamOptions();
+  }
+
+  // The API answers with each team's full details; the stored form is just
+  // {league, team}, so keep both - one to render, one to save.
+  followed = (current.teams || []).map((entry) => ({
+    league: entry.league,
+    team: (entry.team.abbr || "").toLowerCase(),
+    name: entry.team.name,
+    label: entry.label,
+  }));
+
+  followedList.innerHTML = "";
+  if (!followed.length) {
+    const li = document.createElement("li");
+    li.className = "today-empty";
+    li.textContent = "No teams followed - the Today page will show nothing.";
+    followedList.append(li);
+  }
+
+  followed.forEach((entry, index) => {
+    const li = document.createElement("li");
+    const title = document.createElement("div");
+    title.className = "row-title";
+    const name = document.createElement("span");
+    name.textContent = entry.name || entry.team.toUpperCase();
+    const sub = document.createElement("span");
+    sub.className = "row-subtext";
+    sub.textContent = entry.label || entry.league.toUpperCase();
+    title.append(name, sub);
+    li.append(title);
+
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "pill-button";
+    remove.textContent = "Remove";
+    remove.addEventListener("click", () => saveFollowed(followed.filter((_, i) => i !== index)));
+    li.append(remove);
+    followedList.append(li);
+  });
+}
+
+async function loadTeamOptions() {
+  followTeam.innerHTML = "";
+  const data = await fetch(`/api/sports/teams/${followLeague.value}`)
+    .then((r) => r.json())
+    .catch(() => ({ teams: [] }));
+  (data.teams || []).forEach((team) => {
+    const option = document.createElement("option");
+    option.value = team.id;
+    option.textContent = team.name;
+    followTeam.append(option);
+  });
+  if (!data.teams?.length) {
+    const option = document.createElement("option");
+    option.textContent = "Couldn't load teams";
+    followTeam.append(option);
+  }
+}
+
+async function saveFollowed(teams) {
+  const result = await post("/api/sports/following", {
+    teams: teams.map(({ league, team }) => ({ league, team })),
+  });
+  if (result) loadFollowed();
+}
+
+followLeague.addEventListener("change", loadTeamOptions);
+
+document.getElementById("follow-add-button").addEventListener("click", () => {
+  if (!followTeam.value) return;
+  saveFollowed([...followed, { league: followLeague.value, team: followTeam.value }]);
+});
+
 /* ---------- rail sections ---------- */
 
 const SECTION_LABELS = {
@@ -387,6 +482,7 @@ async function loadSections() {
 loadBluetooth();
 loadTouch();
 loadSections();
+loadFollowed();
 
 // The page is a settings screen, not something to sit on: nav.js already sends the
 // wall home after ten idle minutes, and stopping the Bluetooth poll when the page

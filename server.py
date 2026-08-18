@@ -772,11 +772,13 @@ def api_sports_leagues():
 @app.route("/api/sports/scoreboard/<league>")
 def api_sports_scoreboard(league):
     week = request.args.get("week")
+    season_type = request.args.get("seasontype")
     return jsonify(
         sports_service.scoreboard(
             league,
             date=request.args.get("date"),
             week=int(week) if week and week.isdigit() else None,
+            seasontype=int(season_type) if season_type and season_type.isdigit() else None,
         )
     )
 
@@ -784,6 +786,27 @@ def api_sports_scoreboard(league):
 @app.route("/api/sports/news/<league>")
 def api_sports_news(league):
     return jsonify(sports_service.news(league))
+
+
+@app.route("/api/sports/standings/<league>")
+def api_sports_standings(league):
+    return jsonify(sports_service.standings(league))
+
+
+@app.route("/api/sports/teams/<league>")
+def api_sports_teams(league):
+    return jsonify(sports_service.teams(league))
+
+
+@app.route("/api/sports/following", methods=["POST"])
+def api_sports_following_set():
+    try:
+        followed = preferences.set_followed_teams(
+            (request.json or {}).get("teams"), set(sports_service.LEAGUES)
+        )
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"ok": True, "teams": followed})
 
 
 @app.route("/api/sports/rankings/<league>")

@@ -27,6 +27,7 @@ import requests
 from app.config import DEMO_MODE, PROJECT_ROOT
 
 BASE = "https://site.api.espn.com/apis/site/v2/sports"
+BASE_V2 = "https://site.api.espn.com/apis/v2/sports"
 
 # Order matters: it is the tab order on the page, and the first is the default.
 # `nav` is how you move through a league's fixtures, and it follows how the sport
@@ -82,6 +83,19 @@ def _unavailable(message: str, **extra) -> dict:
 def _get(path: str) -> dict:
     try:
         response = requests.get(f"{BASE}/{path}", timeout=REQUEST_TIMEOUT)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as exc:
+        raise SportsUnavailable(f"Couldn't reach the scores service ({type(exc).__name__}).") from exc
+    except ValueError as exc:
+        raise SportsUnavailable("The scores service sent something unreadable.") from exc
+
+
+def _get_v2(path: str) -> dict:
+    """Standings only. ESPN serves them from apis/v2 rather than apis/site/v2, and
+    the site path answers 200 with a stub carrying nothing but a link."""
+    try:
+        response = requests.get(f"{BASE_V2}/{path}", timeout=REQUEST_TIMEOUT)
         response.raise_for_status()
         return response.json()
     except requests.exceptions.RequestException as exc:
@@ -194,7 +208,48 @@ def _write_cache_file() -> None:
         pass
 
 
-def scoreboard(league: str, date: str | None = None, week: int | None = None) -> dict:
+def _week_calendar(data: dict) -> list[dict]:
+    """Every week ESPN knows about, flattened across season types, in order.
+
+    This is what makes stepping honest. ESPN numbers weeks *within* a season type, so
+    "week 2" is preseason week 2 in August and regular-season week 2 in September -
+    forcing seasontype=2 on a step in August silently jumped a month into the future,
+    which is exactly what it did before this existed.
+
+    Their labels come along too, because they are better than anything constructed
+    here: "Hall of Fame Weekend", "Preseason Week 1", "Wild Card".
+    """
+    flat = []
+    for block in ((data.get("leagues") or [{}])[0].get("calendar") or []):
+        if not isinstance(block, dict):
+            continue
+        try:
+            season_type = int(block.get("value"))
+        except (TypeError, ValueError):
+            continue
+        for entry in block.get("entries") or []:
+            try:
+                number = int(entry.get("value"))
+            except (TypeError, ValueError):
+                continue
+            flat.append(
+                {
+                    "seasontype": season_type,
+                    "week": number,
+                    "label": entry.get("label") or f"Week {number}",
+                    # e.g. "Preseason" - shown when the label alone doesn't say it.
+                    "season_label": block.get("label"),
+                }
+            )
+    return flat
+
+
+def scoreboard(
+    league: str,
+    date: str | None = None,
+    week: int | None = None,
+    seasontype: int | None = None,
+) -> dict:
     """A day's or a week's games.
 
     `date` is YYYY-MM-DD and applies to the date-stepped leagues; `week` is a week
@@ -215,11 +270,12 @@ def scoreboard(league: str, date: str | None = None, week: int | None = None) ->
         except ValueError:
             return _unavailable(f"{date!r} is not a date.")
     if week:
-        # seasontype=2 is the regular season. Without it ESPN answers with preseason
-        # or bowl games depending on the time of year, so week 3 means three
-        # different things across the autumn.
         query["week"] = str(int(week))
-        query["seasontype"] = "2"
+        # Carried, never assumed. Pinning this to 2 (regular season) made a step from
+        # preseason week 2 land on regular-season week 2 - a month later - and
+        # labelled it plain "Week 2" with nothing saying preseason anywhere.
+        if seasontype:
+            query["seasontype"] = str(int(seasontype))
 
     def build() -> dict:
         suffix = "&".join(f"{k}={v}" for k, v in query.items())
@@ -237,9 +293,11 @@ def scoreboard(league: str, date: str | None = None, week: int | None = None) ->
             "date": date,
             "week": (data.get("week") or {}).get("number") or week,
             "season": (data.get("season") or {}).get("year"),
+            "season_type": (data.get("season") or {}).get("type"),
+            "calendar": _week_calendar(data),
         }
 
-    return _cached(f"scoreboard:{league}:{date}:{week}", build)
+    return _cached(f"scoreboard:{league}:{date}:{week}:{seasontype}", build)
 
 
 def news(league: str) -> dict:
@@ -265,6 +323,7 @@ def news(league: str) -> dict:
                     # originals are big enough to be worth not shipping to a Pi.
                     "image": (images[0].get("url") if images else None),
                     "byline": item.get("byline"),
+                    "link": ((item.get("links") or {}).get("web") or {}).get("href"),
                 }
             )
         return {
@@ -363,6 +422,10 @@ def following(teams: list[dict] | None = None) -> dict:
     One team failing must not cost the others theirs - the same rule air quality and
     pollen follow.
     """
+    if teams is None:
+        from app import preferences
+
+        teams = preferences.followed_teams()
     wanted = teams or DEFAULT_FOLLOWING
     entries = []
     errors = []
@@ -388,6 +451,96 @@ def leagues() -> list[dict]:
             "sport": value["sport"],
             "nav": value["nav"],
             "rankings": bool(value.get("rankings")),
+            "standings": True,
         }
         for key, value in LEAGUES.items()
     ]
+
+
+def standings(league: str) -> dict:
+    """Division tables - the Braves' actual race, not a 15-team league list.
+
+    A different host prefix from everything else here: standings live under
+    `apis/v2`, not `apis/site/v2`. `level=3` is what nests divisions inside each
+    conference; without it MLB answers with two 15-team blocks and "NL East" does
+    not exist in the payload at all.
+    """
+    if league not in LEAGUES:
+        return _unavailable(f"{league!r} is not a league this wall follows.", groups=[])
+    if DEMO_MODE:
+        from app import demo_sports
+
+        return demo_sports.standings(league)
+
+    def build() -> dict:
+        data = _get_v2(f"{LEAGUES[league]['path']}/standings?level=3")
+        groups = []
+        for conference in data.get("children", []):
+            # Divisions when the sport has them, the conference itself when it
+            # doesn't - soccer is a single table.
+            divisions = conference.get("children") or [conference]
+            for division in divisions:
+                entries = []
+                for entry in (division.get("standings") or {}).get("entries", []):
+                    stats = {s.get("name"): s.get("displayValue") for s in entry.get("stats", [])}
+                    team_info = entry.get("team") or {}
+                    entries.append(
+                        {
+                            "abbr": team_info.get("abbreviation"),
+                            "name": team_info.get("displayName") or team_info.get("name"),
+                            "color": f"#{team_info['color']}" if team_info.get("color") else None,
+                            "wins": stats.get("wins"),
+                            "losses": stats.get("losses"),
+                            # Soccer has draws and points; the US sports don't.
+                            "ties": stats.get("ties"),
+                            "points": stats.get("points"),
+                            "pct": stats.get("winPercent"),
+                            # "-" for the leader, "6.0" for everyone else.
+                            "behind": stats.get("gamesBehind"),
+                            "streak": stats.get("streak"),
+                        }
+                    )
+                if entries:
+                    groups.append({"name": division.get("name"), "teams": entries})
+        return {
+            "available": True,
+            "errors": [],
+            "league": league,
+            "label": LEAGUES[league]["label"],
+            "sport": LEAGUES[league]["sport"],
+            "groups": groups,
+            "games": [],
+        }
+
+    return _cached(f"standings:{league}", build)
+
+
+def teams(league: str) -> dict:
+    """Every team in a league, for the followed-teams picker on /system."""
+    if league not in LEAGUES:
+        return _unavailable(f"{league!r} is not a league this wall follows.", teams=[])
+    if DEMO_MODE:
+        from app import demo_sports
+
+        return demo_sports.teams(league)
+
+    def build() -> dict:
+        data = _get(f"{LEAGUES[league]['path']}/teams")
+        listed = []
+        for wrapper in (
+            data.get("sports", [{}])[0].get("leagues", [{}])[0].get("teams", [])
+        ):
+            info = wrapper.get("team") or {}
+            listed.append(
+                {
+                    # `slug` is what the team endpoint accepts, and it is not always
+                    # the abbreviation - Georgia Tech is "gt" but plenty are longer.
+                    "id": info.get("abbreviation", "").lower() or info.get("slug"),
+                    "name": info.get("displayName"),
+                    "abbr": info.get("abbreviation"),
+                }
+            )
+        listed.sort(key=lambda t: (t["name"] or "").lower())
+        return {"available": True, "errors": [], "league": league, "teams": listed, "games": []}
+
+    return _cached(f"teams:{league}", build)

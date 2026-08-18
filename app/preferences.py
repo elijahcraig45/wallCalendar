@@ -65,6 +65,43 @@ DEFAULT_DISPLAY_OFF_MINUTES = 40
 ALLOWED_DISPLAY_OFF_MINUTES = (0, 30, 40, 60, 120)
 
 
+# Teams shown on the Today page. Stored per wall like everything else in here, and
+# validated against the league list rather than trusted, because the value reaches an
+# upstream URL path.
+DEFAULT_FOLLOWED_TEAMS = [
+    {"league": "mlb", "team": "atl"},
+    {"league": "cfb", "team": "gt"},
+]
+MAX_FOLLOWED_TEAMS = 6
+
+
+def followed_teams() -> list[dict]:
+    stored = load_prefs().get("followed_teams")
+    if not isinstance(stored, list) or not stored:
+        return [dict(t) for t in DEFAULT_FOLLOWED_TEAMS]
+    return stored
+
+
+def set_followed_teams(teams: list[dict], valid_leagues: set[str]) -> list[dict]:
+    cleaned = []
+    for entry in teams or []:
+        if not isinstance(entry, dict):
+            continue
+        league = str(entry.get("league", "")).lower()
+        team = str(entry.get("team", "")).lower()
+        if league not in valid_leagues:
+            raise ValueError(f"{league!r} is not a league this wall follows.")
+        # Reaches an upstream URL path, so it is checked rather than escaped.
+        if not team or not all(c.isalnum() or c == "-" for c in team):
+            raise ValueError(f"{team!r} is not a team id.")
+        if {"league": league, "team": team} not in cleaned:
+            cleaned.append({"league": league, "team": team})
+    if len(cleaned) > MAX_FOLLOWED_TEAMS:
+        raise ValueError(f"At most {MAX_FOLLOWED_TEAMS} teams can be followed.")
+    update_prefs(followed_teams=cleaned)
+    return cleaned
+
+
 def display_settings() -> dict:
     prefs = load_prefs()
     brightness = float(prefs.get("brightness", 1.0))

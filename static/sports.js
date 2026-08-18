@@ -15,6 +15,8 @@ const firstTab = document.querySelector(".sports-tab");
 let currentLeague = firstTab?.dataset.league || "mlb";
 let currentNav = firstTab?.dataset.nav || "date";
 let currentView = "games";
+// Which calendar slot ESPN called current, so "Now" has something to return to.
+let homeIndex = null;
 let sportsPollTimer = null;
 
 /* How far from "now" the view is: days for the date-stepped leagues, weeks for the
@@ -128,6 +130,25 @@ function articleRow(article) {
     desc.textContent = article.description;
     body.append(desc);
   }
+
+  /* Tapping expands in place rather than opening the Web tab. ESPN's
+     Content-Security-Policy sets frame-ancestors to its own domains, so an article
+     cannot be framed here at all - sending someone to the Web tab would hand them a
+     blank frame. The full text is not in this API either, so the honest thing to
+     offer is the summary plus where it came from. */
+  if (article.link) {
+    const source = document.createElement("div");
+    source.className = "sports-source hidden";
+    source.textContent = article.byline
+      ? `${article.byline} · espn.com`
+      : "espn.com";
+    body.append(source);
+    li.classList.add("sports-article--expandable");
+    li.addEventListener("click", () => {
+      const open = li.classList.toggle("sports-article--open");
+      source.classList.toggle("hidden", !open);
+    });
+  }
   li.append(body);
 
   if (article.published) {
@@ -149,6 +170,65 @@ function relativeTime(iso) {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.round(hours / 24);
   return days === 1 ? "yesterday" : `${days}d ago`;
+}
+
+/* ---------- standings ---------- */
+
+// What a "record" is depends on the sport, and it cannot be inferred from which
+// fields are populated: ESPN returns a `points` stat for MLB too (a run-differential
+// derived number), so preferring it whenever present labelled the Braves "13.0 pts".
+let standingsSport = null;
+
+function standingsGroup(group) {
+  const li = document.createElement("li");
+  li.className = "sports-standings-group";
+
+  const heading = document.createElement("div");
+  heading.className = "sports-standings-name";
+  heading.textContent = group.name || "";
+  li.append(heading);
+
+  group.teams.forEach((team) => {
+    const row = document.createElement("div");
+    row.className = "sports-standings-row";
+    // The followed teams are what this page is really for, so they are marked.
+    if (followedAbbrs.has((team.abbr || "").toUpperCase())) {
+      row.classList.add("sports-standings-row--mine");
+    }
+
+    const bar = document.createElement("span");
+    bar.className = "sports-team-color";
+    if (team.color) bar.style.background = team.color;
+    row.append(bar);
+
+    const name = document.createElement("span");
+    name.className = "sports-standings-team";
+    name.textContent = team.name || team.abbr;
+    row.append(name);
+
+    const record = document.createElement("span");
+    record.className = "sports-standings-record";
+    // Soccer has draws and points; the US sports have wins and losses.
+    /* Ties are dropped when there aren't any. ESPN reports ties: "0" for baseball,
+       where the concept doesn't exist, so including it unconditionally rendered the
+       Braves as "74-51-0". The NFL genuinely can tie, so this keeps the column when
+       the number is real rather than deciding by sport. */
+    const parts = [team.wins, team.losses];
+    if (team.ties && team.ties !== "0") parts.push(team.ties);
+    record.textContent =
+      standingsSport === "soccer" && team.points != null
+        ? `${team.points} pts`
+        : parts.filter((v) => v != null).join("-");
+    row.append(record);
+
+    const behind = document.createElement("span");
+    behind.className = "sports-standings-behind";
+    behind.textContent = team.behind && team.behind !== "-" ? `${team.behind} GB` : "";
+    row.append(behind);
+
+    li.append(row);
+  });
+  return li;
 }
 
 /* ---------- rankings ---------- */
@@ -190,19 +270,33 @@ function rankingRow(team) {
 
 /* ---------- loading ---------- */
 
+/* For the week-stepped leagues the position is an index into ESPN's own calendar,
+   not an arithmetic offset. Weeks are numbered *within* a season type, so "week 2 +
+   1" is not a thing you can compute: in August it has to become preseason week 3,
+   and at the end of preseason it has to roll into regular-season week 1. Walking
+   their list gets all of that, plus their labels, for free. */
+let calendar = [];
+let weekIndex = null;
+
 function navQuery() {
-  if (!offset) return "";
   if (currentNav === "week") {
-    // Weeks are absolute on ESPN's side, so the offset needs a base. The server
-    // reports which week it answered with; until it has, stepping is relative to 1.
-    return `?week=${Math.max(1, (lastWeek || 1) + offset)}`;
+    if (weekIndex == null || !calendar[weekIndex]) return "";
+    const slot = calendar[weekIndex];
+    return `?week=${slot.week}&seasontype=${slot.seasontype}`;
   }
+  if (!offset) return "";
   const day = new Date();
   day.setDate(day.getDate() + offset);
   return `?date=${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
 }
 
-let lastWeek = null;
+/* Which teams to pick out of a standings table. Read once - the list only changes
+   from /system, which reloads the page. */
+const followedAbbrs = new Set();
+fetch("/api/sports/following")
+  .then((r) => r.json())
+  .then((d) => (d.teams || []).forEach((t) => followedAbbrs.add((t.team.abbr || "").toUpperCase())))
+  .catch(() => {});
 
 function renderWhen(data) {
   const isGames = currentView === "games";
@@ -210,8 +304,17 @@ function renderWhen(data) {
   if (!isGames) return;
 
   if (currentNav === "week") {
-    sportsWhen.textContent = data.week ? `Week ${data.week}` : "";
-  } else if (offset === 0) {
+    const slot = calendar[weekIndex];
+    /* ESPN's label, not a constructed one: it already says "Preseason Week 1",
+       "Hall of Fame Weekend" and "Wild Card", where anything built here would have
+       said "Week 1" for all three. */
+    sportsWhen.textContent = slot ? slot.label : data.week ? `Week ${data.week}` : "";
+    document.getElementById("sports-prev").disabled = weekIndex === 0;
+    document.getElementById("sports-next").disabled = weekIndex === calendar.length - 1;
+    document.getElementById("sports-now").classList.toggle("hidden", weekIndex === homeIndex);
+    return;
+  }
+  if (offset === 0) {
     sportsWhen.textContent = "Today";
   } else {
     const day = new Date();
@@ -240,7 +343,17 @@ async function loadView() {
   }
 
   sportsGames.innerHTML = "";
-  if (data.week) lastWeek = data.week;
+
+  // The calendar arrives with every scoreboard; adopt it the first time, and pin
+  // "now" to whatever ESPN considered current on that first, unparameterised call.
+  if (data.calendar?.length && !calendar.length) {
+    calendar = data.calendar;
+    weekIndex = calendar.findIndex(
+      (c) => c.week === data.week && c.seasontype === data.season_type
+    );
+    if (weekIndex < 0) weekIndex = 0;
+    homeIndex = weekIndex;
+  }
   renderWhen(data);
 
   if (!data.available) {
@@ -257,6 +370,15 @@ async function loadView() {
     const articles = data.articles || [];
     if (!articles.length) sportsStatus.textContent = `No ${data.label} headlines right now.`;
     articles.forEach((a) => sportsGames.append(articleRow(a)));
+    scheduleSportsPoll(false);
+    return;
+  }
+
+  if (currentView === "standings") {
+    const groups = data.groups || [];
+    standingsSport = data.sport;
+    if (!groups.length) sportsStatus.textContent = "No table published yet.";
+    groups.forEach((g) => sportsGames.append(standingsGroup(g)));
     scheduleSportsPoll(false);
     return;
   }
@@ -279,7 +401,7 @@ async function loadView() {
   data.games.forEach((game) => sportsGames.append(gameRow(game)));
   // Only chase a live score when looking at the current slate - a past Saturday
   // never changes.
-  scheduleSportsPoll(data.has_live && offset === 0);
+  scheduleSportsPoll(data.has_live && (currentNav === "week" ? weekIndex === homeIndex : offset === 0));
 }
 
 function scheduleSportsPoll(hasLive) {
@@ -299,7 +421,9 @@ document.querySelectorAll(".sports-tab").forEach((tab) => {
     // A week number from one league means nothing in another, and neither does a
     // date offset once the nav mode changes, so switching league starts at "now".
     offset = 0;
-    lastWeek = null;
+    calendar = [];
+    weekIndex = null;
+    homeIndex = null;
     document.querySelector('.sports-view-tab[data-view="rankings"]')
       .classList.toggle("hidden", tab.dataset.rankings !== "yes");
     if (currentView === "rankings" && tab.dataset.rankings !== "yes") setView("games");
@@ -325,6 +449,7 @@ if (typeof onIdle === "function") {
       // today's games again by the time anyone looks at it.
       setView("games");
       offset = 0;
+      weekIndex = homeIndex;
       loadView();
     }
   });
@@ -347,18 +472,21 @@ document.querySelectorAll(".sports-view-tab").forEach((tab) => {
   });
 });
 
-document.getElementById("sports-prev").addEventListener("click", () => {
-  offset -= 1;
+function step(by) {
+  if (currentNav === "week") {
+    if (weekIndex == null) return;
+    weekIndex = Math.min(calendar.length - 1, Math.max(0, weekIndex + by));
+  } else {
+    offset += by;
+  }
   loadView();
-});
+}
 
-document.getElementById("sports-next").addEventListener("click", () => {
-  offset += 1;
-  loadView();
-});
+document.getElementById("sports-prev").addEventListener("click", () => step(-1));
+document.getElementById("sports-next").addEventListener("click", () => step(1));
 
 document.getElementById("sports-now").addEventListener("click", () => {
   offset = 0;
-  lastWeek = null;
+  weekIndex = homeIndex;
   loadView();
 });

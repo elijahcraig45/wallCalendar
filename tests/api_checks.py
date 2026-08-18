@@ -1184,6 +1184,93 @@ def check_sports_normalises_both_status_shapes():
               and game["home"]["abbr"] == "MIN")
 
 
+def check_sports_week_stepping_respects_season_type():
+    """ESPN numbers weeks *within* a season type, so a week number alone is ambiguous.
+
+    Pinning seasontype=2 (regular season) on every week query meant that in August -
+    when the NFL is in preseason - stepping from "week 2" landed on regular-season
+    week 2, a month in the future, and labelled it plain "Week 2" with nothing saying
+    preseason anywhere. Caught on the wall, not here.
+
+    The fix walks ESPN's own calendar, which also supplies the labels: "Hall of Fame
+    Weekend" and "Wild Card" are weeks 1 of their season types and would both have
+    rendered as "Week 1".
+    """
+    print("sports week stepping respects season type")
+    from app.sports_service import _week_calendar
+
+    payload = {
+        "leagues": [
+            {
+                "calendar": [
+                    {"value": "1", "label": "Preseason", "entries": [
+                        {"value": "1", "label": "Hall of Fame Weekend"},
+                        {"value": "2", "label": "Preseason Week 1"},
+                    ]},
+                    {"value": "2", "label": "Regular Season", "entries": [
+                        {"value": "1", "label": "Week 1"},
+                    ]},
+                    {"value": "3", "label": "Postseason", "entries": [
+                        {"value": "1", "label": "Wild Card"},
+                    ]},
+                    # Off-season carries no weeks and must simply vanish.
+                    {"value": "4", "label": "Off Season", "entries": []},
+                ]
+            }
+        ]
+    }
+    flat = _week_calendar(payload)
+    check("every season type's weeks are flattened in order", len(flat) == 4, repr(flat))
+    check(
+        "preseason comes before the regular season",
+        [c["seasontype"] for c in flat] == [1, 1, 2, 3],
+        repr([c["seasontype"] for c in flat]),
+    )
+    check(
+        "stepping off the end of preseason rolls into the regular season",
+        flat[1]["seasontype"] == 1 and flat[2]["seasontype"] == 2 and flat[2]["week"] == 1,
+    )
+    # The labels are the reason to use their calendar rather than build week numbers.
+    check(
+        "ESPN's own labels are kept",
+        [c["label"] for c in flat[:1] + flat[3:]] == ["Hall of Fame Weekend", "Wild Card"],
+        repr([c["label"] for c in flat]),
+    )
+    check("three different weeks all numbered 1 stay distinct",
+          len({(c["seasontype"], c["week"]) for c in flat}) == 4)
+    check("a malformed calendar is skipped, not fatal", _week_calendar({"leagues": [{}]}) == [])
+
+    # And the query has to carry the season type rather than assume one.
+    from unittest.mock import patch
+
+    from app import sports_service
+
+    seen = {}
+
+    def fake_get(path):
+        seen["path"] = path
+        return {"events": [], "week": {"number": 2}, "season": {"type": 1}}
+
+    with (
+        patch.object(sports_service, "DEMO_MODE", False),
+        patch.object(sports_service, "_cache", {}),
+        patch.object(sports_service, "_get", fake_get),
+    ):
+        sports_service.scoreboard("nfl", week=2, seasontype=1)
+    check("a preseason step asks for preseason", "seasontype=1" in seen.get("path", ""),
+          seen.get("path", ""))
+
+    seen.clear()
+    with (
+        patch.object(sports_service, "DEMO_MODE", False),
+        patch.object(sports_service, "_cache", {}),
+        patch.object(sports_service, "_get", fake_get),
+    ):
+        sports_service.scoreboard("nfl", week=2)
+    check("and no season type is invented when none was given",
+          "seasontype" not in seen.get("path", ""), seen.get("path", ""))
+
+
 def check_display_settings_validation():
     """Brightness and sleep settings, and the floor under brightness.
 
@@ -1697,6 +1784,7 @@ def main():
         check_rc_xml_render_is_well_formed,
         check_sports_degrades_instead_of_failing,
         check_sports_normalises_both_status_shapes,
+        check_sports_week_stepping_respects_season_type,
         check_display_settings_validation,
         check_dimmers_compose_without_going_black,
         check_manual_screen_off_can_always_be_woken,

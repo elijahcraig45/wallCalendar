@@ -3483,6 +3483,89 @@ textarea.text-input {
   white-space: nowrap;
 }
 
+/* Expandable rather than a link: ESPN's CSP forbids framing its articles, so the
+   Web tab would only ever show a blank frame. */
+.sports-article--expandable { cursor: pointer; }
+.sports-article--open { background: var(--tint); border-radius: 8px; }
+
+.sports-source {
+  margin-top: 6px;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+/* ---------- standings ---------- */
+
+/* `.row-list li` beats a bare class on specificity (0,1,1 against 0,1,0), so this
+   has to name both or the group keeps .row-list's horizontal flex and every team in
+   a division renders on one line running off the side of the screen. Exactly the
+   trap the note on `.hidden` at the end of this file describes. */
+.row-list li.sports-standings-group {
+  display: block;
+  padding: 10px 8px 14px;
+}
+
+.sports-standings-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+
+/* Capped rather than full-bleed. On a 1920px wall a full-width row put the record
+   seventeen hundred pixels from the team it belongs to, which is not a table so much
+   as two unrelated columns. */
+.sports-standings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0 4px;
+  max-width: 46rem;
+}
+
+.sports-standings-name { max-width: 46rem; }
+
+/* The followed teams are the reason to look at a table at all. */
+.sports-standings-row--mine {
+  background: var(--tint);
+  border-radius: 6px;
+  font-weight: 600;
+}
+
+.sports-standings-team { flex: 1; min-width: 0; }
+
+.sports-standings-record {
+  flex: 0 0 auto;
+  min-width: 5em;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.sports-standings-behind {
+  flex: 0 0 auto;
+  min-width: 5em;
+  text-align: right;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- followed-teams picker ---------- */
+
+#follow-add {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+#follow-add select { flex: 1; min-width: 8rem; min-height: 44px; }
+#follow-add .pill-button { min-height: 44px; }
+
 /* ---------- rankings ---------- */
 
 .sports-rank-row {

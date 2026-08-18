@@ -172,9 +172,25 @@ def scoreboard(league: str, date: str | None = None, week: int | None = None) ->
         "has_live": any(g["live"] for g in games),
         "nav": _NAV[league],
         "date": date,
-        "week": week or 3,
+        "week": week or 2,
         "season": 2026,
+        "season_type": 1 if league == "nfl" else 2,
+        # Mirrors the real shape, including the NFL sitting in preseason - the state
+        # that made forcing seasontype=2 silently jump a month.
+        "calendar": _CALENDARS.get(league, []),
     }
+
+
+_CALENDARS = {
+    "nfl": (
+        [{"seasontype": 1, "week": i, "label": "Hall of Fame Weekend" if i == 1 else f"Preseason Week {i - 1}",
+          "season_label": "Preseason"} for i in range(1, 5)]
+        + [{"seasontype": 2, "week": i, "label": f"Week {i}", "season_label": "Regular Season"}
+           for i in range(1, 19)]
+    ),
+    "cfb": [{"seasontype": 2, "week": i, "label": f"Week {i}", "season_label": "Regular Season"}
+            for i in range(1, 16)],
+}
 
 
 def team(league: str, team_id: str) -> dict:
@@ -258,6 +274,7 @@ def news(league: str) -> dict:
             "published": (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=i * 5)).isoformat(),
             "image": None,
             "byline": "Wall Calendar fixtures",
+            "link": "https://www.espn.com/",
         }
         for i, (headline, description) in enumerate(_NEWS[league])
     ]
@@ -303,4 +320,80 @@ def rankings(league: str = "cfb") -> dict:
             for i, (name, abbr, record) in enumerate(_AP_TOP)
         ],
         "games": [],
+    }
+
+
+# ---------- standings ----------
+
+_STANDINGS = {
+    "mlb": [
+        ("National League East", [
+            ("PHI", "Philadelphia Phillies", 68, 58, "-"),
+            ("ATL", "Atlanta Braves", 74, 51, "-"),
+            ("NYM", "New York Mets", 57, 69, "16.5"),
+            ("MIA", "Miami Marlins", 64, 62, "10.0"),
+            ("WSH", "Washington Nationals", 60, 66, "14.0"),
+        ]),
+        ("National League Central", [
+            ("MIL", "Milwaukee Brewers", 77, 48, "-"),
+            ("CHC", "Chicago Cubs", 73, 53, "4.5"),
+            ("STL", "St. Louis Cardinals", 64, 62, "13.5"),
+            ("CIN", "Cincinnati Reds", 60, 65, "17.0"),
+            ("PIT", "Pittsburgh Pirates", 61, 66, "16.5"),
+        ]),
+    ],
+    "cfb": [("ACC", [
+        ("GT", "Georgia Tech", 3, 0, "-"), ("CLEM", "Clemson", 3, 0, "-"),
+        ("FSU", "Florida State", 2, 1, "1.0"), ("MIA", "Miami", 2, 1, "1.0"),
+    ])],
+    "nfl": [("NFC South", [
+        ("ATL", "Atlanta Falcons", 2, 0, "-"), ("TB", "Tampa Bay Buccaneers", 2, 1, "0.5"),
+        ("NO", "New Orleans Saints", 1, 1, "1.0"), ("CAR", "Carolina Panthers", 0, 3, "2.5"),
+    ])],
+    "epl": [("Premier League", [
+        ("LIV", "Liverpool", 3, 0, "-"), ("ARS", "Arsenal", 2, 1, "-"),
+        ("MCI", "Man City", 2, 1, "-"), ("CHE", "Chelsea", 1, 2, "-"),
+    ])],
+}
+
+
+def standings(league: str) -> dict:
+    label, _sport = _LABELS[league]
+    groups = [
+        {
+            "name": name,
+            "teams": [
+                {
+                    "abbr": abbr, "name": team_name, "color": "#B3A369" if abbr == "GT" else None,
+                    "wins": str(wins), "losses": str(losses), "ties": None, "points": None,
+                    "pct": f"{wins / max(1, wins + losses):.3f}".lstrip("0"),
+                    "behind": behind, "streak": None,
+                }
+                for abbr, team_name, wins, losses, behind in rows
+            ],
+        }
+        for name, rows in _STANDINGS[league]
+    ]
+    return {"available": True, "errors": [], "league": league, "label": label,
+            "sport": _LABELS[league][1], "groups": groups, "games": []}
+
+
+# ---------- team picker ----------
+
+_TEAMS = {
+    "mlb": [("atl", "Atlanta Braves", "ATL"), ("nyy", "New York Yankees", "NYY"),
+            ("lad", "Los Angeles Dodgers", "LAD"), ("bos", "Boston Red Sox", "BOS")],
+    "cfb": [("gt", "Georgia Tech Yellow Jackets", "GT"), ("uga", "Georgia Bulldogs", "UGA"),
+            ("clem", "Clemson Tigers", "CLEM"), ("bama", "Alabama Crimson Tide", "BAMA")],
+    "nfl": [("atl", "Atlanta Falcons", "ATL"), ("kc", "Kansas City Chiefs", "KC"),
+            ("dal", "Dallas Cowboys", "DAL"), ("phi", "Philadelphia Eagles", "PHI")],
+    "epl": [("ars", "Arsenal", "ARS"), ("liv", "Liverpool", "LIV"),
+            ("mci", "Manchester City", "MCI"), ("che", "Chelsea", "CHE")],
+}
+
+
+def teams(league: str) -> dict:
+    return {
+        "available": True, "errors": [], "league": league, "games": [],
+        "teams": [{"id": i, "name": n, "abbr": a} for i, n, a in _TEAMS[league]],
     }
