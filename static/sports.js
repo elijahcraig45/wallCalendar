@@ -8,8 +8,20 @@
 const sportsGames = document.getElementById("sports-games");
 const sportsStatus = document.getElementById("sports-status");
 
-let currentLeague = document.querySelector(".sports-tab")?.dataset.league || "mlb";
+const sportsNav = document.getElementById("sports-nav");
+const sportsWhen = document.getElementById("sports-when");
+
+const firstTab = document.querySelector(".sports-tab");
+let currentLeague = firstTab?.dataset.league || "mlb";
+let currentNav = firstTab?.dataset.nav || "date";
+let currentView = "games";
 let sportsPollTimer = null;
+
+/* How far from "now" the view is: days for the date-stepped leagues, weeks for the
+   football ones. Kept as an offset rather than an absolute so "Today" is always a
+   reset to zero and the server decides what current means - the wall's clock and
+   ESPN's idea of the current week are not always the same thing. */
+let offset = 0;
 
 /* A live game's score is the one thing on this page worth chasing. Nothing else here
    changes minute to minute, and the server caches on the same rule, so a fast poll
@@ -96,44 +108,184 @@ function gameRow(game) {
   return li;
 }
 
-async function loadScoreboard(league) {
+/* ---------- news ---------- */
+
+function articleRow(article) {
+  const li = document.createElement("li");
+  li.className = "sports-article";
+
+  const body = document.createElement("div");
+  body.className = "sports-article-body";
+
+  const headline = document.createElement("div");
+  headline.className = "sports-headline";
+  headline.textContent = article.headline || "";
+  body.append(headline);
+
+  if (article.description) {
+    const desc = document.createElement("div");
+    desc.className = "sports-desc";
+    desc.textContent = article.description;
+    body.append(desc);
+  }
+  li.append(body);
+
+  if (article.published) {
+    const when = document.createElement("span");
+    when.className = "sports-published";
+    when.textContent = relativeTime(article.published);
+    li.append(when);
+  }
+  return li;
+}
+
+/** "2h ago" / "yesterday". A wall-calendar reader wants to know if a headline is
+ *  fresh, not the exact minute it was filed. */
+function relativeTime(iso) {
+  const then = new Date(iso);
+  if (Number.isNaN(then.getTime())) return "";
+  const hours = Math.round((Date.now() - then.getTime()) / 3600000);
+  if (hours < 1) return "just now";
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  return days === 1 ? "yesterday" : `${days}d ago`;
+}
+
+/* ---------- rankings ---------- */
+
+function rankingRow(team) {
+  const li = document.createElement("li");
+  li.className = "sports-rank-row";
+
+  const rank = document.createElement("span");
+  rank.className = "sports-rank-num";
+  rank.textContent = team.rank;
+  li.append(rank);
+
+  const bar = document.createElement("span");
+  bar.className = "sports-team-color";
+  if (team.color) bar.style.background = team.color;
+  li.append(bar);
+
+  const name = document.createElement("span");
+  name.className = "sports-rank-name";
+  name.textContent = team.name || team.abbr;
+  li.append(name);
+
+  const record = document.createElement("span");
+  record.className = "sports-record";
+  record.textContent = team.record || "";
+  li.append(record);
+
+  // Movement since last week's poll, which is the thing worth glancing at.
+  if (team.previous && team.rank && team.previous !== team.rank) {
+    const move = document.createElement("span");
+    const up = team.previous > team.rank;
+    move.className = `sports-move sports-move--${up ? "up" : "down"}`;
+    move.textContent = `${up ? "▲" : "▼"}${Math.abs(team.previous - team.rank)}`;
+    li.append(move);
+  }
+  return li;
+}
+
+/* ---------- loading ---------- */
+
+function navQuery() {
+  if (!offset) return "";
+  if (currentNav === "week") {
+    // Weeks are absolute on ESPN's side, so the offset needs a base. The server
+    // reports which week it answered with; until it has, stepping is relative to 1.
+    return `?week=${Math.max(1, (lastWeek || 1) + offset)}`;
+  }
+  const day = new Date();
+  day.setDate(day.getDate() + offset);
+  return `?date=${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+}
+
+let lastWeek = null;
+
+function renderWhen(data) {
+  const isGames = currentView === "games";
+  sportsNav.classList.toggle("hidden", !isGames);
+  if (!isGames) return;
+
+  if (currentNav === "week") {
+    sportsWhen.textContent = data.week ? `Week ${data.week}` : "";
+  } else if (offset === 0) {
+    sportsWhen.textContent = "Today";
+  } else {
+    const day = new Date();
+    day.setDate(day.getDate() + offset);
+    sportsWhen.textContent = day.toLocaleDateString(undefined, {
+      weekday: "short", month: "short", day: "numeric",
+    });
+  }
+  document.getElementById("sports-now").classList.toggle("hidden", offset === 0);
+}
+
+async function loadView() {
+  const endpoint =
+    currentView === "games"
+      ? `/api/sports/scoreboard/${currentLeague}${navQuery()}`
+      : `/api/sports/${currentView}/${currentLeague}`;
+
   let data;
   try {
-    const resp = await fetch(`/api/sports/scoreboard/${league}`);
+    const resp = await fetch(endpoint);
     data = await resp.json();
   } catch (e) {
-    // The endpoint answers 200-with-an-explanation, so reaching here means the wall
+    // The endpoints answer 200-with-an-explanation, so reaching here means the wall
     // couldn't reach its own server.
-    data = { available: false, errors: ["Couldn't reach the wall's own server."], games: [] };
+    data = { available: false, errors: ["Couldn't reach the wall's own server."] };
   }
 
   sportsGames.innerHTML = "";
+  if (data.week) lastWeek = data.week;
+  renderWhen(data);
 
   if (!data.available) {
-    sportsStatus.textContent = data.errors?.[0] || "Scores are unavailable right now.";
+    sportsStatus.textContent = data.errors?.[0] || "Unavailable right now.";
+    scheduleSportsPoll(false);
+    return;
+  }
+
+  sportsStatus.textContent = data.stale
+    ? "Showing the last data that loaded - the scores service isn't answering."
+    : "";
+
+  if (currentView === "news") {
+    const articles = data.articles || [];
+    if (!articles.length) sportsStatus.textContent = `No ${data.label} headlines right now.`;
+    articles.forEach((a) => sportsGames.append(articleRow(a)));
+    scheduleSportsPoll(false);
+    return;
+  }
+
+  if (currentView === "rankings") {
+    const teams = data.teams || [];
+    if (!teams.length) sportsStatus.textContent = "No poll published yet.";
+    teams.forEach((t) => sportsGames.append(rankingRow(t)));
     scheduleSportsPoll(false);
     return;
   }
 
   if (!data.games.length) {
-    sportsStatus.textContent = `No ${data.label} games today.`;
+    sportsStatus.textContent =
+      currentNav === "week" ? `No ${data.label} games that week.` : `No ${data.label} games that day.`;
     scheduleSportsPoll(false);
     return;
   }
 
-  // Says so rather than quietly showing old scores as if they were current.
-  sportsStatus.textContent = data.stale
-    ? "Showing the last scores that loaded - the scores service isn't answering."
-    : "";
-
   data.games.forEach((game) => sportsGames.append(gameRow(game)));
-  scheduleSportsPoll(data.has_live);
+  // Only chase a live score when looking at the current slate - a past Saturday
+  // never changes.
+  scheduleSportsPoll(data.has_live && offset === 0);
 }
 
 function scheduleSportsPoll(hasLive) {
   clearTimeout(sportsPollTimer);
   sportsPollTimer = setTimeout(
-    () => loadScoreboard(currentLeague),
+    loadView,
     hasLive ? LIVE_POLL_MS : IDLE_POLL_MS
   );
 }
@@ -143,12 +295,20 @@ document.querySelectorAll(".sports-tab").forEach((tab) => {
     document.querySelectorAll(".sports-tab").forEach((t) => t.classList.remove("active"));
     tab.classList.add("active");
     currentLeague = tab.dataset.league;
+    currentNav = tab.dataset.nav;
+    // A week number from one league means nothing in another, and neither does a
+    // date offset once the nav mode changes, so switching league starts at "now".
+    offset = 0;
+    lastWeek = null;
+    document.querySelector('.sports-view-tab[data-view="rankings"]')
+      .classList.toggle("hidden", tab.dataset.rankings !== "yes");
+    if (currentView === "rankings" && tab.dataset.rankings !== "yes") setView("games");
     sportsStatus.textContent = "Loading…";
-    loadScoreboard(currentLeague);
+    loadView();
   });
 });
 
-loadScoreboard(currentLeague);
+loadView();
 
 // The shell sends the wall home after ten idle minutes; stop polling when this page
 // goes away rather than leaving a timer running against a detached document.
@@ -160,5 +320,45 @@ if (typeof onIdle === "function") {
   onIdle(() => {
     const first = document.querySelector(".sports-tab");
     if (first && currentLeague !== first.dataset.league) first.click();
+    else if (offset !== 0 || currentView !== "games") {
+      // Left on last Saturday's scores or a news list, the wall should be showing
+      // today's games again by the time anyone looks at it.
+      setView("games");
+      offset = 0;
+      loadView();
+    }
   });
 }
+
+/* ---------- view + date navigation ---------- */
+
+function setView(view) {
+  currentView = view;
+  document.querySelectorAll(".sports-view-tab").forEach((t) =>
+    t.classList.toggle("active", t.dataset.view === view)
+  );
+}
+
+document.querySelectorAll(".sports-view-tab").forEach((tab) => {
+  tab.addEventListener("click", () => {
+    setView(tab.dataset.view);
+    sportsStatus.textContent = "Loading…";
+    loadView();
+  });
+});
+
+document.getElementById("sports-prev").addEventListener("click", () => {
+  offset -= 1;
+  loadView();
+});
+
+document.getElementById("sports-next").addEventListener("click", () => {
+  offset += 1;
+  loadView();
+});
+
+document.getElementById("sports-now").addEventListener("click", () => {
+  offset = 0;
+  lastWeek = null;
+  loadView();
+});

@@ -29,11 +29,22 @@ from app.config import DEMO_MODE, PROJECT_ROOT
 BASE = "https://site.api.espn.com/apis/site/v2/sports"
 
 # Order matters: it is the tab order on the page, and the first is the default.
+# `nav` is how you move through a league's fixtures, and it follows how the sport
+# actually schedules rather than being uniform for its own sake: baseball and the
+# Premier League play most days, so they step by date; college and pro football play
+# in weeks, and stepping those day by day would walk through empty Tuesdays.
 LEAGUES = {
-    "mlb": {"path": "baseball/mlb", "label": "MLB", "sport": "baseball"},
-    "cfb": {"path": "football/college-football", "label": "College Football", "sport": "football"},
-    "nfl": {"path": "football/nfl", "label": "NFL", "sport": "football"},
-    "epl": {"path": "soccer/eng.1", "label": "Premier League", "sport": "soccer"},
+    "mlb": {"path": "baseball/mlb", "label": "MLB", "sport": "baseball", "nav": "date"},
+    "cfb": {
+        "path": "football/college-football",
+        "label": "College Football",
+        "sport": "football",
+        "nav": "week",
+        # Only college football has a poll worth showing.
+        "rankings": True,
+    },
+    "nfl": {"path": "football/nfl", "label": "NFL", "sport": "football", "nav": "week"},
+    "epl": {"path": "soccer/eng.1", "label": "Premier League", "sport": "soccer", "nav": "date"},
 }
 
 # Teams followed on the Today page. Keyed by league so the same code serves both.
@@ -183,16 +194,36 @@ def _write_cache_file() -> None:
         pass
 
 
-def scoreboard(league: str) -> dict:
+def scoreboard(league: str, date: str | None = None, week: int | None = None) -> dict:
+    """A day's or a week's games.
+
+    `date` is YYYY-MM-DD and applies to the date-stepped leagues; `week` is a week
+    number and applies to the football ones. Both are optional - with neither, ESPN
+    answers for whatever is current, which is what the page wants on first load.
+    """
     if league not in LEAGUES:
         return _unavailable(f"{league!r} is not a league this wall follows.")
     if DEMO_MODE:
         from app import demo_sports
 
-        return demo_sports.scoreboard(league)
+        return demo_sports.scoreboard(league, date=date, week=week)
+
+    query = {}
+    if date:
+        try:
+            query["dates"] = dt.date.fromisoformat(date).strftime("%Y%m%d")
+        except ValueError:
+            return _unavailable(f"{date!r} is not a date.")
+    if week:
+        # seasontype=2 is the regular season. Without it ESPN answers with preseason
+        # or bowl games depending on the time of year, so week 3 means three
+        # different things across the autumn.
+        query["week"] = str(int(week))
+        query["seasontype"] = "2"
 
     def build() -> dict:
-        data = _get(f"{LEAGUES[league]['path']}/scoreboard")
+        suffix = "&".join(f"{k}={v}" for k, v in query.items())
+        data = _get(f"{LEAGUES[league]['path']}/scoreboard" + (f"?{suffix}" if suffix else ""))
         games = [_game(e) for e in data.get("events", [])]
         return {
             "available": True,
@@ -200,12 +231,92 @@ def scoreboard(league: str) -> dict:
             "league": league,
             "label": LEAGUES[league]["label"],
             "sport": LEAGUES[league]["sport"],
+            "nav": LEAGUES[league]["nav"],
             "games": games,
             "has_live": any(g["live"] for g in games),
-            "day": (data.get("day") or {}).get("date"),
+            "date": date,
+            "week": (data.get("week") or {}).get("number") or week,
+            "season": (data.get("season") or {}).get("year"),
         }
 
-    return _cached(f"scoreboard:{league}", build)
+    return _cached(f"scoreboard:{league}:{date}:{week}", build)
+
+
+def news(league: str) -> dict:
+    """Headlines for a league. Cached long - this is reading, not score-watching."""
+    if league not in LEAGUES:
+        return _unavailable(f"{league!r} is not a league this wall follows.", articles=[])
+    if DEMO_MODE:
+        from app import demo_sports
+
+        return demo_sports.news(league)
+
+    def build() -> dict:
+        data = _get(f"{LEAGUES[league]['path']}/news")
+        articles = []
+        for item in data.get("articles", []):
+            images = item.get("images") or []
+            articles.append(
+                {
+                    "headline": item.get("headline"),
+                    "description": item.get("description"),
+                    "published": item.get("published"),
+                    # Smallest usable image: these render as a thumbnail, and ESPN's
+                    # originals are big enough to be worth not shipping to a Pi.
+                    "image": (images[0].get("url") if images else None),
+                    "byline": item.get("byline"),
+                }
+            )
+        return {
+            "available": True,
+            "errors": [],
+            "league": league,
+            "label": LEAGUES[league]["label"],
+            "articles": articles,
+            "games": [],
+        }
+
+    return _cached(f"news:{league}", build)
+
+
+def rankings(league: str = "cfb") -> dict:
+    """The AP Top 25, for the one league that has a poll worth showing."""
+    if not LEAGUES.get(league, {}).get("rankings"):
+        return _unavailable(f"{league!r} has no rankings.", teams=[])
+    if DEMO_MODE:
+        from app import demo_sports
+
+        return demo_sports.rankings(league)
+
+    def build() -> dict:
+        data = _get(f"{LEAGUES[league]['path']}/rankings")
+        polls = data.get("rankings") or []
+        # AP first when it's there; ESPN's order is not guaranteed.
+        poll = next((p for p in polls if "AP" in (p.get("shortName") or "")), polls[0] if polls else {})
+        teams = []
+        for entry in poll.get("ranks", []):
+            team_info = entry.get("team") or {}
+            teams.append(
+                {
+                    "rank": entry.get("current"),
+                    "previous": entry.get("previous"),
+                    "name": team_info.get("nickname") or team_info.get("name"),
+                    "abbr": team_info.get("abbreviation"),
+                    "record": entry.get("recordSummary"),
+                    "points": entry.get("points"),
+                    "color": f"#{team_info['color']}" if team_info.get("color") else None,
+                }
+            )
+        return {
+            "available": True,
+            "errors": [],
+            "league": league,
+            "label": poll.get("name") or "Rankings",
+            "teams": teams,
+            "games": [],
+        }
+
+    return _cached(f"rankings:{league}", build)
 
 
 def team(league: str, team_id: str) -> dict:
@@ -271,6 +382,12 @@ def following(teams: list[dict] | None = None) -> dict:
 
 def leagues() -> list[dict]:
     return [
-        {"key": key, "label": value["label"], "sport": value["sport"]}
+        {
+            "key": key,
+            "label": value["label"],
+            "sport": value["sport"],
+            "nav": value["nav"],
+            "rankings": bool(value.get("rankings")),
+        }
         for key, value in LEAGUES.items()
     ]

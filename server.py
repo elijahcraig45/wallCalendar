@@ -771,7 +771,24 @@ def api_sports_leagues():
 
 @app.route("/api/sports/scoreboard/<league>")
 def api_sports_scoreboard(league):
-    return jsonify(sports_service.scoreboard(league))
+    week = request.args.get("week")
+    return jsonify(
+        sports_service.scoreboard(
+            league,
+            date=request.args.get("date"),
+            week=int(week) if week and week.isdigit() else None,
+        )
+    )
+
+
+@app.route("/api/sports/news/<league>")
+def api_sports_news(league):
+    return jsonify(sports_service.news(league))
+
+
+@app.route("/api/sports/rankings/<league>")
+def api_sports_rankings(league):
+    return jsonify(sports_service.rankings(league))
 
 
 @app.route("/api/sports/following")

@@ -5,7 +5,10 @@
    puts Day/Week/Month/Agenda there - same job, same place. #}
 <div id="sports-tabs">
   {% for league in leagues %}
-  <button class="sports-tab{% if loop.first %} active{% endif %}" data-league="{{ league.key }}">
+  <button class="sports-tab{% if loop.first %} active{% endif %}"
+          data-league="{{ league.key }}"
+          data-nav="{{ league.nav }}"
+          data-rankings="{{ 'yes' if league.rankings else 'no' }}">
     {{ league.label }}
   </button>
   {% endfor %}
@@ -14,9 +17,30 @@
 
 {% block content %}
 <div id="sports-view">
+  <div id="sports-bar">
+    {# Games / News, plus Rankings for the one league that has a poll. The buttons
+       are rendered here rather than built in JS so the row has a stable height and
+       the page doesn't reflow as the view loads. #}
+    <div id="sports-views">
+      <button class="sports-view-tab active" data-view="games">Games</button>
+      <button class="sports-view-tab" data-view="news">News</button>
+      <button class="sports-view-tab hidden" data-view="rankings">Rankings</button>
+    </div>
+
+    {# Steps by day for baseball and the Premier League, by week for the football
+       leagues - matching how each sport actually schedules. Hidden entirely on the
+       views where it means nothing. #}
+    <div id="sports-nav">
+      <button id="sports-prev" class="pill-button" aria-label="Previous">‹</button>
+      <button id="sports-now" class="pill-button">Today</button>
+      <span id="sports-when"></span>
+      <button id="sports-next" class="pill-button" aria-label="Next">›</button>
+    </div>
+  </div>
+
   <div id="sports-status" class="field-hint"></div>
-  {# One list, re-rendered per tab. All four leagues normalise to the same game
-     shape in sports_service, so nothing here needs to know which sport it is. #}
+  {# One list, re-rendered per tab and per view. All four leagues normalise to the
+     same game shape in sports_service, so nothing here needs to know the sport. #}
   <ul id="sports-games" class="row-list"></ul>
 </div>
 {% endblock %}

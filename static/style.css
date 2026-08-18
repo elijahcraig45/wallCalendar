@@ -3413,6 +3413,108 @@ textarea.text-input {
 #sports-status:empty { display: none; }
 #sports-status { margin-bottom: 10px; }
 
+#sports-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+#sports-views { display: flex; gap: 6px; }
+
+.sports-view-tab {
+  padding: 6px 14px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.sports-view-tab.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+#sports-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#sports-nav .pill-button { min-width: 48px; min-height: 44px; justify-content: center; }
+
+#sports-when {
+  min-width: 7em;
+  text-align: center;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- news ---------- */
+
+.sports-article {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 12px 8px;
+}
+
+.sports-article-body { flex: 1; min-width: 0; }
+
+.sports-headline { font-weight: 600; line-height: 1.35; }
+
+.sports-desc {
+  margin-top: 4px;
+  font-size: 0.88rem;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+
+.sports-published {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+/* ---------- rankings ---------- */
+
+.sports-rank-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 8px;
+}
+
+.sports-rank-num {
+  flex: 0 0 auto;
+  min-width: 2.2em;
+  text-align: right;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.sports-rank-name { flex: 1; min-width: 0; font-weight: 600; }
+
+/* Movement is shown with an arrow as well as a colour, so it still reads on a
+   palette where the two greens and reds sit close together. */
+.sports-move {
+  flex: 0 0 auto;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sports-move--up { color: #1a7f37; }
+.sports-move--down { color: #b3261e; }
+
 .sports-game {
   /* Overrides .row-list li's horizontal flex: a game is two stacked team rows with
      its status alongside, not a single line. */

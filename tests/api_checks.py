@@ -1108,7 +1108,12 @@ def check_sports_degrades_instead_of_failing():
             side_effect=requests.exceptions.ConnectionError("boom"),
         ),
     ):
-        for path in ("/api/sports/scoreboard/mlb", "/api/sports/following"):
+        for path in (
+            "/api/sports/scoreboard/mlb",
+            "/api/sports/following",
+            "/api/sports/news/mlb",
+            "/api/sports/rankings/cfb",
+        ):
             resp = client.get(path)
             body = resp.get_json()
             check(f"{path} answers 200 when ESPN is down", resp.status_code == 200,
@@ -1121,6 +1126,24 @@ def check_sports_degrades_instead_of_failing():
     resp = client.get("/api/sports/scoreboard/quidditch")
     check("an unknown league degrades too", resp.status_code == 200
           and resp.get_json().get("available") is False)
+    # Rankings only exist for college football; asking elsewhere is a normal state,
+    # not an error - the page hides the tab, but the endpoint must still answer.
+    resp = client.get("/api/sports/rankings/mlb")
+    check("rankings for a league with no poll degrade", resp.status_code == 200
+          and resp.get_json().get("available") is False)
+
+    # The date goes into an upstream query string, so it is parsed rather than
+    # passed through.
+    with patch.object(sports_service, "DEMO_MODE", False), patch.object(sports_service, "_cache", {}):
+        resp = client.get("/api/sports/scoreboard/mlb?date=not-a-date")
+        check("a bad date is refused, not forwarded", resp.status_code == 200
+              and resp.get_json().get("available") is False,
+              repr(resp.get_json())[:100])
+
+    # Each league steps the way its sport actually schedules.
+    nav = {league["key"]: league["nav"] for league in sports_service.leagues()}
+    check("baseball and soccer step by date", nav["mlb"] == "date" and nav["epl"] == "date", repr(nav))
+    check("both footballs step by week", nav["cfb"] == "week" and nav["nfl"] == "week", repr(nav))
 
 
 def check_sports_normalises_both_status_shapes():
