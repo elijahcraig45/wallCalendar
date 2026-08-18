@@ -156,6 +156,23 @@ def restore_kiosk() -> dict:
 
 OUTPUT_NAME = "HDMI-A-1"
 
+# Seconds of stillness before a manual "screen off" actually blanks. Not zero: the
+# tap on the button is itself input, so swayidle's clock starts from it - this is the
+# grace period for a finger to leave the glass rather than a delay for its own sake.
+MANUAL_OFF_DELAY_SECONDS = 2
+
+# Called by the resume hook so the normal timeout comes back the moment someone wakes
+# the wall. Loopback, because it is only ever invoked by a shell command on this box.
+RESUME_HOOK_URL = "http://127.0.0.1:5000/api/system/display/resumed"
+
+# Belt and braces for the manual-off state. If the resume hook never lands (Flask
+# restarting at exactly the wrong moment), a 2-second timeout left in place would
+# blank the wall two seconds after every idle moment - unusable. So the manual state
+# also expires on its own.
+MANUAL_OFF_MAX_MINUTES = 15
+
+_restore_timer: threading.Timer | None = None
+
 
 def _swayidle_running() -> bool:
     # Queries about the display are read by the shell on every page, so they answer
@@ -170,27 +187,23 @@ def stop_display_off() -> None:
     _run(["pkill", "-x", "swayidle"])
 
 
-def apply_display_off(minutes: int) -> dict:
-    """(Re)start swayidle with the configured timeout. 0 disables it.
-
-    Restarted rather than reconfigured because swayidle takes its timeouts on the
-    command line. Killing it first is what makes this idempotent - two swayidles
-    would both fire and fight over the output.
-    """
-    stop_display_off()
-    if not minutes:
-        return {"ok": True, "enabled": False}
-
+def _start_swayidle(timeout_seconds: int, *, restore_on_resume: bool) -> None:
+    resume = f"wlopm --on {OUTPUT_NAME}"
+    if restore_on_resume:
+        # -m so a hung request can't wedge the hook, and the whole point of the hook:
+        # put the configured timeout back as soon as someone wakes the wall, so a
+        # 2-second manual timeout never outlives the manual state.
+        resume += f"; curl -s -m 5 -X POST {RESUME_HOOK_URL} >/dev/null 2>&1"
     try:
         subprocess.Popen(
             [
                 "swayidle",
                 "-w",
                 "timeout",
-                str(minutes * 60),
+                str(timeout_seconds),
                 f"wlopm --off {OUTPUT_NAME}",
                 "resume",
-                f"wlopm --on {OUTPUT_NAME}",
+                resume,
             ],
             env=_session_env(),
             stdout=subprocess.DEVNULL,
@@ -204,12 +217,62 @@ def apply_display_off(minutes: int) -> dict:
             "Could not start swayidle, so the screen will not power off. "
             "(apt install swayidle wlopm)"
         ) from exc
+
+
+def apply_display_off(minutes: int) -> dict:
+    """(Re)start swayidle with the configured timeout. 0 disables it.
+
+    Restarted rather than reconfigured because swayidle takes its timeouts on the
+    command line. Killing it first is what makes this idempotent - two swayidles
+    would both fire and fight over the output.
+    """
+    _cancel_restore()
+    stop_display_off()
+    if not minutes:
+        return {"ok": True, "enabled": False}
+    _start_swayidle(minutes * 60, restore_on_resume=False)
     return {"ok": True, "enabled": True, "minutes": minutes}
 
 
+def _cancel_restore() -> None:
+    global _restore_timer
+    if _restore_timer is not None:
+        _restore_timer.cancel()
+        _restore_timer = None
+
+
+def screen_off_now() -> dict:
+    """Blank the panel now, leaving a touch able to bring it back.
+
+    Deliberately NOT `wlopm --off` on its own. Measured on the wall: labwc does not
+    wake a powered-off output on input, and swayidle only fires `resume` for an idle
+    period *it* started - so blanking directly would leave a dark wall that no amount
+    of tapping recovers, which is the one outcome this must never produce.
+
+    Instead the managed swayidle is restarted with a 2-second timeout, so swayidle is
+    the thing that blanks the panel and is therefore armed to un-blank it on the next
+    touch. Its resume hook restores the configured timeout immediately; the timer
+    below is the fallback if that hook never lands.
+    """
+    global _restore_timer
+    stop_display_off()
+    _cancel_restore()
+    _start_swayidle(MANUAL_OFF_DELAY_SECONDS, restore_on_resume=True)
+
+    _restore_timer = threading.Timer(MANUAL_OFF_MAX_MINUTES * 60, sync_display_off_from_prefs)
+    _restore_timer.daemon = True
+    _restore_timer.start()
+    return {"ok": True, "off_in_seconds": MANUAL_OFF_DELAY_SECONDS}
+
+
 def sync_display_off_from_prefs() -> dict:
-    """Called at startup and whenever the setting changes, so prefs stay the single
-    source of truth for it - the same arrangement as the calibration."""
+    """Put the configured timeout back.
+
+    Called at startup, whenever the setting changes, and by the resume hook after a
+    manual screen-off - so prefs stay the single source of truth, the same
+    arrangement as the calibration. Never raises: it is the recovery path, including
+    from a threading.Timer where an exception would just vanish.
+    """
     minutes = preferences.display_settings()["display_off_minutes"]
     try:
         return apply_display_off(minutes)

@@ -3462,6 +3462,22 @@ textarea.text-input {
 
 #display-off-row select { flex: 0 0 auto; width: auto; min-height: 44px; }
 
+#sleep-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+/* Equal halves rather than content-width: these are the two most consequential
+   buttons in the panel and both need a full thumb, not a tight label box. */
+#sleep-actions .pill-button {
+  flex: 1;
+  min-height: 48px;
+  justify-content: center;
+}
+
+#screen-off-hint { margin: 10px 0 0; }
+
 /* ---------- the sleep screen ----------
    Above the dimming overlay (3000) and the alert banner (3100), because it replaces
    the page rather than shading it. Below the calibration overlay (4000), which takes

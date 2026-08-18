@@ -688,6 +688,19 @@ def api_system_display_set():
     return jsonify(settings)
 
 
+@app.route("/api/system/display/off", methods=["POST"])
+def api_system_display_off():
+    return jsonify(system_service.screen_off_now())
+
+
+@app.route("/api/system/display/resumed", methods=["POST"])
+def api_system_display_resumed():
+    # Called by swayidle's resume hook, not by the page: after a manual screen-off the
+    # timeout is 2 seconds, and it has to go back to the configured value the moment
+    # someone wakes the wall or it would blank again two seconds later.
+    return jsonify(system_service.sync_display_off_from_prefs())
+
+
 @app.route("/api/system/display/wake", methods=["POST"])
 def api_system_display_wake():
     return jsonify(system_service.wake_display())

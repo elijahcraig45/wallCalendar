@@ -107,3 +107,31 @@ document.getElementById("sleep-now").addEventListener("click", () => {
   brightnessPanel.close();
   setTimeout(sleepNow, 150);
 });
+
+/* Turning the panel off is a server-side job, not a page one: labwc does not wake a
+   powered-off output on input, so swayidle has to be the thing that blanks it in
+   order to be armed to un-blank it. See system_service.screen_off_now. */
+document.getElementById("screen-off-now").addEventListener("click", async () => {
+  brightnessPanel.close();
+  const result = await postDisplayAction("/api/system/display/off");
+  if (!result) return;
+  // Says what will happen, not what did: the panel is about to go dark, so this toast
+  // is the last thing anyone reads.
+  showToast("Screen off - tap anywhere to wake it");
+});
+
+/* Named for this file rather than `post`. Every page script declares its own
+   top-level `post`, and this is a *shell* script loaded before them, so a plain
+   `post` here would be silently replaced by whichever page happened to load - with a
+   different signature. tests/api_checks.py checks for exactly that. */
+async function postDisplayAction(path) {
+  try {
+    const resp = await fetch(path, { method: "POST" });
+    if (resp.ok) return await resp.json();
+    const data = await resp.json().catch(() => ({}));
+    showToast(data.error || "Couldn't do that");
+  } catch (e) {
+    showToast("Couldn't do that");
+  }
+  return null;
+}

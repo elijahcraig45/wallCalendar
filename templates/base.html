@@ -208,7 +208,18 @@
           <label for="display-off-minutes">Turn the screen off after</label>
           <select id="display-off-minutes" class="text-input"></select>
         </div>
-        <button id="sleep-now" class="full-width-button" type="button">Sleep now</button>
+        {# Two depths, matching the two automatic stages, so "now" and "after a while"
+           do the same things. Both come back on a touch. #}
+        <div id="sleep-actions">
+          <button id="sleep-now" class="pill-button" type="button">Sleep now</button>
+          <button id="screen-off-now" class="pill-button pill-button--accent" type="button">
+            Turn the screen off
+          </button>
+        </div>
+        <p class="field-hint" id="screen-off-hint">
+          The screen goes dark a couple of seconds after you take your finger off it.
+          Tap anywhere to bring it back.
+        </p>
       </div>
     </div>
 

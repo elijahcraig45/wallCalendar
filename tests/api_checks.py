@@ -124,7 +124,7 @@ def check_no_global_script_collisions():
     static = pathlib.Path(__file__).resolve().parent.parent / "static"
     shell = ["panel.js", "themes.js", "weather.js", "nav.js", "timers.js", "brightness.js"]
     pages = ["calendar.js", "spotify.js", "recipes.js", "today.js",
-             "browser.js", "accounts.js", "groceries.js"]
+             "browser.js", "accounts.js", "groceries.js", "system.js"]
     patterns = (
         re.compile(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\("),
         re.compile(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*="),
@@ -1198,6 +1198,90 @@ def check_dimmers_compose_without_going_black():
     )
 
 
+def check_manual_screen_off_can_always_be_woken():
+    """Turning the panel off by hand must never strand the wall dark.
+
+    Two measured facts make this delicate. labwc does NOT wake a powered-off output on
+    input, and swayidle only fires `resume` for an idle period *it* started. So calling
+    `wlopm --off` directly - the obvious implementation - produces a black screen that
+    no amount of tapping recovers, and only SSH can undo.
+
+    The implementation therefore restarts swayidle with a 2-second timeout and lets
+    *it* blank the panel, which arms it to un-blank on the next touch. What this pins:
+    that the off path never blanks directly, that a resume hook is attached to put the
+    configured timeout back, and that the state expires on its own if that hook is
+    lost.
+    """
+    print("manual screen-off is always wakeable")
+    from unittest.mock import patch
+
+    from app import system_service as sysx
+
+    spawned = []
+
+    class FakePopen:
+        def __init__(self, args, **kwargs):
+            spawned.append(args)
+
+    with (
+        patch.object(sysx.subprocess, "Popen", FakePopen),
+        patch.object(sysx, "_run", return_value=_ok()),
+        patch.object(sysx.threading, "Timer") as timer,
+    ):
+        result = sysx.screen_off_now()
+
+    check("it reports the grace period", result["off_in_seconds"] == sysx.MANUAL_OFF_DELAY_SECONDS)
+    check("exactly one swayidle is started", len(spawned) == 1, repr(spawned))
+
+    argv = spawned[0]
+    check("it is swayidle, not a direct wlopm --off", argv[0] == "swayidle", repr(argv[0]))
+    joined = " ".join(argv)
+    check(
+        "swayidle is the thing that blanks the panel, so it can un-blank it",
+        f"wlopm --off {sysx.OUTPUT_NAME}" in joined,
+    )
+    check(
+        "a resume action turns the output back on",
+        "resume" in argv and f"wlopm --on {sysx.OUTPUT_NAME}" in joined,
+    )
+    check(
+        "the timeout is the short manual grace period",
+        str(sysx.MANUAL_OFF_DELAY_SECONDS) in argv,
+        repr(argv),
+    )
+    # Without this the 2-second timeout would survive being woken, and the wall would
+    # blank again two seconds after every idle moment.
+    check(
+        "resume calls back to restore the configured timeout",
+        sysx.RESUME_HOOK_URL in joined,
+        joined,
+    )
+    check("and a fallback timer is armed in case that hook is lost", timer.called)
+
+    # The scheduled fallback must be the restore, not something else.
+    check(
+        "the fallback restores from prefs",
+        timer.call_args is not None
+        and timer.call_args[0][1] is sysx.sync_display_off_from_prefs,
+        repr(timer.call_args),
+    )
+
+    # And the normal path must NOT attach a resume hook - only the manual state needs
+    # restoring, and a hook on the 40-minute timeout would fire a request on every wake.
+    spawned.clear()
+    with (
+        patch.object(sysx.subprocess, "Popen", FakePopen),
+        patch.object(sysx, "_run", return_value=_ok()),
+    ):
+        sysx.apply_display_off(40)
+    check(
+        "the scheduled timeout carries no resume hook",
+        spawned and sysx.RESUME_HOOK_URL not in " ".join(spawned[0]),
+        repr(spawned),
+    )
+    check("...and uses the configured delay in seconds", spawned and "2400" in spawned[0])
+
+
 def check_bluetooth_success_strings():
     """bluetoothctl exits 0 whether an action worked or not, so success is decided
     by matching its prose - and it uses different words per verb.
@@ -1508,6 +1592,7 @@ def main():
         check_rc_xml_render_is_well_formed,
         check_display_settings_validation,
         check_dimmers_compose_without_going_black,
+        check_manual_screen_off_can_always_be_woken,
         check_bluetooth_success_strings,
         check_bluetooth_autoconnect,
         check_unconfirmed_calibration_cannot_survive_a_restart,

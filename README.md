@@ -141,9 +141,21 @@ So it is `swayidle`, which listens to labwc's `ext_idle_notifier_v1` and fires
 than `wlr-randr --off` because it leaves the mode alone: the window is never
 reconfigured and the page never reflows.
 
-Auto-sleep is **night-gated by default** — a kitchen calendar that hides itself at 2pm
-has stopped being a calendar. "Sleep now" works at any hour, and the gate can be
+Both stages also have a button: **Sleep now** and **Turn the screen off**. Auto-sleep
+is **night-gated by default** — a kitchen calendar that hides itself at 2pm has
+stopped being a calendar — but the buttons work at any hour, and the gate can be
 turned off.
+
+**"Turn the screen off" does not call `wlopm --off`, and that is not an accident.**
+Two measured facts make the obvious implementation a trap: labwc does not wake a
+powered-off output on input, and swayidle only fires `resume` for an idle period *it*
+started. Blanking the panel directly therefore produces a wall that no amount of
+tapping recovers — SSH only. So the button restarts swayidle with a 2-second timeout
+and lets *swayidle* do the blanking, which is what arms it to un-blank on the next
+touch. Its resume hook POSTs `/api/system/display/resumed` to put the configured
+timeout straight back, and a 15-minute timer restores it anyway if that hook is ever
+lost — without one of those, a 2-second timeout left in place would blank the wall two
+seconds after every idle moment.
 
 Three things that are easy to get wrong here, all of which were:
 
