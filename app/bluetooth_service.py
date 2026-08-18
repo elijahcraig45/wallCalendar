@@ -343,12 +343,18 @@ def set_autoconnect(enabled: bool) -> dict:
     return {"ok": True, "enabled": bool(enabled)}
 
 
-def reconnect_once() -> list[dict]:
-    """One pass: try to connect every paired, trusted, disconnected device.
+def reconnect_once(force: bool = False) -> list[dict]:
+    """One pass: try to connect every trusted, disconnected device.
 
     Returns what it attempted, which is what makes this testable without a speaker.
     Skips devices the user deliberately disconnected, and devices still inside their
     backoff window.
+
+    `force` ignores the backoff, and is what a person asking for a reconnect *now*
+    gets. Without it the manual path was silently swallowed: the background loop had
+    already tried and failed against a switched-off speaker, so a "try now" tap
+    landed inside the backoff window and answered "attempted nothing" - which reads
+    exactly like a broken button.
     """
     if not autoconnect_enabled():
         return []
@@ -373,7 +379,12 @@ def reconnect_once() -> list[dict]:
             continue
 
         state = _reconnect_state.setdefault(mac, {"failures": 0, "skip": 0})
-        if state["skip"] > 0:
+        if force:
+            # A person asking now outranks the backoff, and clears it so the
+            # background loop resumes from a clean slate either way.
+            state["failures"] = 0
+            state["skip"] = 0
+        elif state["skip"] > 0:
             state["skip"] -= 1
             continue
 

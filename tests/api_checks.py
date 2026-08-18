@@ -1295,6 +1295,24 @@ def check_bluetooth_autoconnect():
             check("a failing device is tried once...", len(calls1) == 1, repr(calls1))
             check("...then backed off rather than paged every cycle", calls2 == [], repr(calls2))
 
+            # A person tapping "reconnect" outranks the backoff. Without force the
+            # manual path answered "attempted nothing" whenever the background loop
+            # had already failed against a switched-off speaker - indistinguishable
+            # from a broken button.
+            forced = []
+
+            def fake_forced(verb, mac, timeout=30):
+                forced.append((verb, mac))
+                return {"ok": False, "error": "not available"}
+
+            with (
+                patch.object(bt, "adapter", return_value={"powered": True}),
+                patch.object(bt, "devices", return_value=[paired_off]),
+                patch.object(bt, "_action", side_effect=fake_forced),
+            ):
+                bt.reconnect_once(force=True)
+            check("a forced pass ignores the backoff", len(forced) == 1, repr(forced))
+
             # A deliberate Disconnect has to stick.
             bt._reconnect_state.clear()
             with patch.object(bt, "_action", return_value={"ok": True}):

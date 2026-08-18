@@ -606,7 +606,12 @@ def api_system_bluetooth_autoconnect():
 def api_system_bluetooth_reconnect():
     # Runs one pass of what the background loop does, so "try now" doesn't mean
     # waiting up to a minute - and so the behaviour is exercisable without a wait.
-    return jsonify({"ok": True, "attempted": bluetooth_service.reconnect_once()})
+    #
+    # force=True: this is a person asking, and the backoff is there to stop a
+    # switched-off speaker being paged every minute, not to refuse a direct request.
+    # Without it a "try now" that landed inside the backoff window answered
+    # "attempted nothing", which is indistinguishable from a broken button.
+    return jsonify({"ok": True, "attempted": bluetooth_service.reconnect_once(force=True)})
 
 
 @app.route("/api/system/bluetooth/scan", methods=["POST"])
