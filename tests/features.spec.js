@@ -45,15 +45,16 @@ for (const vp of VIEWPORTS) {
         });
         await page.goto(target);
         await page.waitForTimeout(1200);
-        // 9 destinations now that System has a page; the rail still has to fit a
+        // 10 destinations now that Sports has a page; the rail still has to fit a
         // 600px panel, which is what the overflow check below is for. That check is
         // the reason this count is worth asserting - each new entry is the one most
-        // likely to push the rail over, and System was the ninth.
+        // likely to push the rail over. Measured before adding Sports: 70px of spacer
+        // slack at 1024x600 against a 46px item, so it fits with room to spare.
         //
         // Sections can be switched off from /system, which removes rail entries, so
         // this is the count with everything on - the default, and the state the
         // fixtures run in.
-        await expect(page.locator(".rail-item")).toHaveCount(9);
+        await expect(page.locator(".rail-item")).toHaveCount(10);
         const railFits = await page.evaluate(() => {
           const rail = document.getElementById("rail");
           return rail.scrollHeight <= rail.clientHeight + 1;

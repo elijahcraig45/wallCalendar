@@ -131,7 +131,9 @@ def set_display_settings(**changes) -> dict:
 # Rail destinations that can be switched off from the System page. Kept to an
 # explicit set so a typo in a POST can't hide a section nothing can turn back on,
 # and so the Calendar (the reason the thing is on the wall) is not in the list.
-HIDEABLE_SECTIONS = ("groceries", "recipes", "weather", "spotify", "browser", "today")
+HIDEABLE_SECTIONS = (
+    "groceries", "recipes", "weather", "spotify", "browser", "today", "sports",
+)
 
 
 def hidden_sections() -> set[str]:

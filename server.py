@@ -18,6 +18,7 @@ from app import (
     preferences,
     recipes_service,
     spotify_service,
+    sports_service,
     system_service,
     version,
     weather_service,
@@ -747,6 +748,35 @@ def api_system_keyboard():
 @app.route("/api/system/kiosk/restore", methods=["POST"])
 def api_system_kiosk_restore():
     return jsonify(system_service.restore_kiosk())
+
+
+# ------------------------------------------------------------------------- sports
+#
+# Every one of these answers 200 even when the upstream is down, carrying
+# {"available": false, "errors": [...]} instead - the shape groceries uses. The Today
+# page reads this on a wall that is on all day, so a 503 would be a failed request
+# every few minutes forever, and the layout tests treat a console error on any page
+# as a regression. See app/sports_service.py.
+
+
+@app.route("/sports")
+def sports_page():
+    return render_template("sports.html", leagues=sports_service.leagues())
+
+
+@app.route("/api/sports/leagues")
+def api_sports_leagues():
+    return jsonify(sports_service.leagues())
+
+
+@app.route("/api/sports/scoreboard/<league>")
+def api_sports_scoreboard(league):
+    return jsonify(sports_service.scoreboard(league))
+
+
+@app.route("/api/sports/following")
+def api_sports_following():
+    return jsonify(sports_service.following())
 
 
 @app.route("/api/browser/probe")

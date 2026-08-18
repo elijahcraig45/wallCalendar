@@ -345,6 +345,7 @@ const SECTION_LABELS = {
   weather: "Weather",
   spotify: "Music",
   browser: "Web",
+  sports: "Sports",
 };
 
 const sectionList = document.getElementById("section-list");

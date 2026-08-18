@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block topbar %}
+{# League tabs live in the top bar rather than the page, matching how the calendar
+   puts Day/Week/Month/Agenda there - same job, same place. #}
+<div id="sports-tabs">
+  {% for league in leagues %}
+  <button class="sports-tab{% if loop.first %} active{% endif %}" data-league="{{ league.key }}">
+    {{ league.label }}
+  </button>
+  {% endfor %}
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="sports-view">
+  <div id="sports-status" class="field-hint"></div>
+  {# One list, re-rendered per tab. All four leagues normalise to the same game
+     shape in sports_service, so nothing here needs to know which sport it is. #}
+  <ul id="sports-games" class="row-list"></ul>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/sports.js?v={{ build }}"></script>
+{% endblock %}

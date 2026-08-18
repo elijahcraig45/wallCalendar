@@ -94,8 +94,15 @@ for (const vp of VIEWPORTS) {
       await expect(page.locator("#time-duration")).not.toHaveText("0:00");
       await expect(page.locator("#device-current-name")).not.toBeEmpty();
 
-      expect(await page.locator("#playlists-strip .tile").count()).toBeGreaterThan(5);
-      expect(await page.locator("#quick-access-grid .quick-tile").count()).toBeGreaterThan(3);
+      /* Polled, not counted once. Playlists and quick-access load on their own
+         fetches, separate from the now-playing pane the assertions above wait for -
+         so counting immediately raced them and read 0. It was the flakiest test in
+         the suite: never once in isolation, roughly half of full runs, and the
+         reported failure moved around depending on what else was in flight. */
+      await expect.poll(() => page.locator("#playlists-strip .tile").count(),
+        { message: "playlists never loaded" }).toBeGreaterThan(5);
+      await expect.poll(() => page.locator("#quick-access-grid .quick-tile").count(),
+        { message: "quick access never loaded" }).toBeGreaterThan(3);
 
       await expectPaneGeometry(page, `${vp.name}: now-playing pane geometry`);
       await shoot(page, `spotify-${vp.name}-home`);

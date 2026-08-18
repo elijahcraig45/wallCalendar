@@ -3378,6 +3378,171 @@ textarea.text-input {
   #alert-banner-dismiss { padding: 4px 14px; font-size: 1.2rem; }
 }
 
+/* ---------- sports ---------- */
+
+#sports-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.sports-tab {
+  padding: 8px 16px;
+  min-height: 44px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+  cursor: pointer;
+}
+
+.sports-tab.active {
+  background: var(--tint);
+  color: var(--text);
+  font-weight: 600;
+}
+
+#sports-view {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px 16px;
+}
+
+#sports-status:empty { display: none; }
+#sports-status { margin-bottom: 10px; }
+
+.sports-game {
+  /* Overrides .row-list li's horizontal flex: a game is two stacked team rows with
+     its status alongside, not a single line. */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 12px 8px;
+}
+
+.sports-teams {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sports-team {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* A finished game says who lost by fading them, which is quicker to read across a
+   kitchen than comparing two numbers. */
+.sports-team--loser { opacity: 0.55; }
+
+/* The only place a team's own colour is used. Never as text or as a text
+   background - several of these are unreadable on this cream ground, and the
+   contrast sweep walks every text node on every page and every theme. */
+.sports-team-color {
+  flex: 0 0 auto;
+  width: 4px;
+  height: 22px;
+  border-radius: 2px;
+  background: var(--border);
+}
+
+.sports-team-name {
+  flex: 0 0 auto;
+  min-width: 4.2em;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sports-rank {
+  margin-right: 5px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--accent);
+  vertical-align: 0.1em;
+}
+
+.sports-record {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.sports-score {
+  flex: 0 0 auto;
+  min-width: 2.2em;
+  text-align: right;
+  font-size: 1.3rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.sports-meta {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+  max-width: 42%;
+  text-align: right;
+}
+
+.sports-detail { font-size: 0.9rem; color: var(--text-dim); }
+
+/* In-progress is the one state worth picking out of a list at a glance. */
+.sports-detail--live { color: var(--accent); font-weight: 600; }
+.sports-game--live { background: var(--tint); border-radius: 8px; }
+
+.sports-extra {
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+/* ---------- sports on the Today page ---------- */
+
+#today-sports { list-style: none; margin: 0; padding: 0; }
+
+.today-sport {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.today-sport-team {
+  flex: 0 0 auto;
+  min-width: 5.5em;
+  font-weight: 600;
+}
+
+.today-sport-line {
+  flex: 1;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-sport-detail {
+  flex: 0 0 auto;
+  font-size: 0.82rem;
+  color: var(--text-dim);
+}
+
+.today-sport-detail--live { color: var(--accent); font-weight: 600; }
+
 /* ---------- brightness & sleep ---------- */
 
 #brightness-chip {

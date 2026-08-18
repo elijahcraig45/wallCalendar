@@ -14,6 +14,7 @@ const eventsList = document.getElementById("today-events");
 const nextList = document.getElementById("today-next");
 const hoursStrip = document.getElementById("today-hours");
 const groceriesList = document.getElementById("today-groceries");
+const sportsList = document.getElementById("today-sports");
 const airBlock = document.getElementById("today-air");
 
 /* How many grocery lines the overview shows before collapsing to "+N more".
@@ -366,6 +367,69 @@ async function loadAir() {
  * targets on /groceries, and a mis-tap from across the kitchen that silently
  * removes something from the list is worse than walking over.
  */
+/** The followed teams, in whatever state they're in.
+ *
+ * A glance, not a scoreboard: one line per team, and the full slate lives on /sports.
+ * The endpoint answers 200 even when ESPN is down (carrying `available: false`), so
+ * there is no error branch to write here beyond reporting what it said.
+ */
+async function loadSports() {
+  // Absent when Sports is switched off on the System page - see today.html.
+  if (!sportsList) return;
+
+  try {
+    const resp = await fetch("/api/sports/following");
+    const data = await resp.json();
+    sportsList.innerHTML = "";
+
+    if (!data.available) {
+      const li = document.createElement("li");
+      li.className = "today-empty";
+      li.textContent = data.errors?.[0] || "Scores unavailable";
+      sportsList.appendChild(li);
+      return;
+    }
+
+    data.teams.forEach((entry) => {
+      const game = entry.game;
+      const li = document.createElement("li");
+      li.className = "today-sport";
+      if (game && game.live) li.classList.add("today-sport--live");
+
+      const name = document.createElement("span");
+      name.className = "today-sport-team";
+      name.textContent = entry.team.short || entry.team.abbr;
+      li.append(name);
+
+      const line = document.createElement("span");
+      line.className = "today-sport-line";
+      if (!game) {
+        // Out of season, which is a normal state for half the year, not a fault.
+        line.textContent = entry.team.record ? `${entry.team.record} · no game scheduled` : "No game scheduled";
+      } else if (game.live || game.final) {
+        const away = game.away, home = game.home;
+        line.textContent = `${away.abbr} ${away.score ?? ""} – ${home.abbr} ${home.score ?? ""}`;
+      } else {
+        line.textContent = game.name || "";
+      }
+      li.append(line);
+
+      const detail = document.createElement("span");
+      detail.className = "today-sport-detail";
+      if (game && game.live) detail.classList.add("today-sport-detail--live");
+      detail.textContent = game ? game.detail || "" : entry.label;
+      li.append(detail);
+
+      sportsList.appendChild(li);
+    });
+
+    if (!data.teams.length) empty(sportsList, "No teams followed.");
+  } catch (e) {
+    sportsList.innerHTML = "";
+    empty(sportsList, "Couldn't load scores.");
+  }
+}
+
 async function loadGroceries() {
   // Absent when Groceries is switched off on the System page: today.html leaves
   // the whole block out. Returning here rather than letting the null reach
@@ -425,6 +489,7 @@ async function loadGroceries() {
 function refreshAll() {
   loadToday();
   loadUpcoming();
+  loadSports();
   loadGroceries();
   loadAir();
 }

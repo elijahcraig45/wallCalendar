@@ -47,6 +47,16 @@
        Dropped entirely when Groceries is switched off on the System page, rather
        than left as an empty heading. today.js guards on the list element being
        absent - see loadGroceries(). #}
+    {# The Braves and Georgia Tech, in whatever state they're in: playing now, playing
+       later, or done. Same guard as groceries below - today.js returns early when the
+       block is absent, because it renders events, weather, sports and groceries in
+       one pass and an unguarded null would take the others down with it. #}
+    {% if "sports" not in hidden %}
+    <div id="today-sports-block">
+      <h3>Sports <a href="/sports" class="today-more">Scores</a></h3>
+      <ul id="today-sports"></ul>
+    </div>
+    {% endif %}
     {% if "groceries" not in hidden %}
     <div id="today-groceries-block">
       <h3>Groceries <a href="/groceries" class="today-more">Open</a></h3>

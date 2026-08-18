@@ -10,6 +10,7 @@ playwright-report/
 data/weather_cache.json
 data/air_cache.json
 data/alerts_cache.json
+data/sports_cache.json
 
 # Per-device runtime state, not configuration - the same reason
 # data/account_labels.json is ignored above.

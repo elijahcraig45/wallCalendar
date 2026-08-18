@@ -124,7 +124,8 @@ def check_no_global_script_collisions():
     static = pathlib.Path(__file__).resolve().parent.parent / "static"
     shell = ["panel.js", "themes.js", "weather.js", "nav.js", "timers.js", "brightness.js"]
     pages = ["calendar.js", "spotify.js", "recipes.js", "today.js",
-             "browser.js", "accounts.js", "groceries.js", "system.js"]
+             "browser.js", "accounts.js", "groceries.js", "system.js",
+             "sports.js"]
     patterns = (
         re.compile(r"(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\("),
         re.compile(r"(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*="),
@@ -1079,6 +1080,87 @@ def check_rc_xml_render_is_well_formed():
     )
 
 
+def check_sports_degrades_instead_of_failing():
+    """ESPN's site API is undocumented and unversioned, so it will fail eventually.
+
+    When it does, /api/sports must answer 200 with an explanation - never a 503. The
+    Today page reads it on a wall that is on all day, so an error status would be a
+    failed request every few minutes forever, and the layout tests treat a console
+    error on any page as a regression. This is the same contract groceries follows,
+    and the same lesson /api/system/display taught the hard way.
+    """
+    print("sports degrades instead of failing")
+    from unittest.mock import patch
+
+    import requests
+
+    from app import sports_service
+    import server
+
+    client = server.app.test_client()
+
+    with (
+        patch.object(sports_service, "DEMO_MODE", False),
+        patch.object(sports_service, "_cache", {}),
+        patch.object(
+            sports_service.requests,
+            "get",
+            side_effect=requests.exceptions.ConnectionError("boom"),
+        ),
+    ):
+        for path in ("/api/sports/scoreboard/mlb", "/api/sports/following"):
+            resp = client.get(path)
+            body = resp.get_json()
+            check(f"{path} answers 200 when ESPN is down", resp.status_code == 200,
+                  f"got {resp.status_code}")
+            check(f"{path} says it is unavailable", body.get("available") is False)
+            check(f"{path} explains why", bool(body.get("errors")), repr(body)[:120])
+
+    # An unknown league is a bad request from the page, not an upstream failure - but
+    # it still must not throw.
+    resp = client.get("/api/sports/scoreboard/quidditch")
+    check("an unknown league degrades too", resp.status_code == 200
+          and resp.get_json().get("available") is False)
+
+
+def check_sports_normalises_both_status_shapes():
+    """ESPN puts a game's status in two different places.
+
+    /scoreboard carries it alongside the event; a team's `nextEvent` nests it under
+    the competition. Reading only the event level left every Today row with a blank
+    status - "ATL @ MIN" with no start time beside it - which is exactly what shipped
+    to the wall before this was caught.
+    """
+    print("sports status normalisation")
+    from app.sports_service import _game
+
+    side = lambda abbr, home: {  # noqa: E731
+        "team": {"abbreviation": abbr, "shortDisplayName": abbr, "color": "13274F"},
+        "homeAway": "home" if home else "away",
+        "score": "3",
+    }
+    status = {"type": {"state": "pre", "shortDetail": "8/18 - 7:40 PM EDT"}}
+    competitors = [side("MIN", True), side("ATL", False)]
+
+    scoreboard_shape = {
+        "id": "1", "shortName": "ATL @ MIN", "date": "2026-08-18T23:40Z",
+        "status": status, "competitions": [{"competitors": competitors}],
+    }
+    next_event_shape = {
+        "id": "1", "shortName": "ATL @ MIN", "date": "2026-08-18T23:40Z",
+        "competitions": [{"competitors": competitors, "status": status}],
+    }
+
+    for label, event in (("scoreboard", scoreboard_shape), ("nextEvent", next_event_shape)):
+        game = _game(event)
+        check(f"{label}: status is found", game["detail"] == "8/18 - 7:40 PM EDT", repr(game["detail"]))
+        check(f"{label}: state is read", game["state"] == "pre" and not game["live"])
+        # ESPN lists home first for US sports and away first for soccer; the page
+        # renders "away @ home" without knowing which sport it is looking at.
+        check(f"{label}: home and away are sorted out", game["away"]["abbr"] == "ATL"
+              and game["home"]["abbr"] == "MIN")
+
+
 def check_display_settings_validation():
     """Brightness and sleep settings, and the floor under brightness.
 
@@ -1590,6 +1672,8 @@ def main():
         check_prefs_setters_do_not_clobber_each_other,
         check_touch_calibration_maths,
         check_rc_xml_render_is_well_formed,
+        check_sports_degrades_instead_of_failing,
+        check_sports_normalises_both_status_shapes,
         check_display_settings_validation,
         check_dimmers_compose_without_going_black,
         check_manual_screen_off_can_always_be_woken,
